@@ -6,9 +6,10 @@ CLI имеет наивысший приоритет.
 
 ## `Config`
 
-`src/config.rs` содержит `api_base_url`, `api_key`, `model`, `working_dir`,
+`src/config.rs` содержит `provider`, `api_base_url`, `api_key`, `model`, `working_dir`,
 `max_tool_rounds`, `request_timeout_secs`, `log_level` и `verbose`.
 
+`LLM_PROVIDER` по умолчанию равен `litellm`; неизвестные значения отклоняются.
 `Config::load` вызывает `dotenvy::dotenv`, затем читает окружение. Для
 детерминированных тестов `Config::from_sources` принимает карту переменных
 явно. Рабочая директория преобразуется в абсолютный путь и проверяется как
@@ -49,3 +50,12 @@ cargo clippy --all-targets --all-features -- -D warnings
 Тесты проверяют defaults, приоритет CLI над environment, пустое имя модели,
 ошибочные числовые значения, несуществующие пути и отсутствие API key в
 `Debug`-выводе.
+
+## Контракт провайдера
+
+`src/llm.rs` содержит сериализуемые Chat Completions-типы,
+`CompletionRequest`, `CompletionResponse`, асинхронный trait `LlmProvider` и
+реализацию `LiteLlmProvider` через `reqwest`. Одноразовый prompt и сообщения
+REPL отправляются на `{LITELLM_BASE_URL}/chat/completions`. Ответ assistant
+добавляется в историю сессии. Tool calls распознаются, но выполнение
+инструментов относится к следующему этапу.

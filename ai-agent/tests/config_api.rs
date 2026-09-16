@@ -17,6 +17,7 @@ fn public_config_api_uses_environment_values() {
     let config = Config::from_sources(&cli, &environment).unwrap();
 
     assert_eq!(config.model, "env-model");
+    assert_eq!(config.provider, "litellm");
     assert_eq!(config.api_base_url, "http://localhost/v1");
 }
 

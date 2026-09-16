@@ -12,6 +12,10 @@ use clap::{ArgAction, Parser};
     about = "Учебный консольный AI-агент без LLM"
 )]
 pub struct Cli {
+    /// LLM provider: `litellm` (по умолчанию) или `ollama`.
+    #[arg(long)]
+    pub provider: Option<String>,
+
     /// Имя модели, которое будет сохранено в сессии.
     #[arg(long)]
     pub model: Option<String>,
@@ -24,6 +28,10 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub working_dir: Option<PathBuf>,
 
+    /// Путь к TOML-конфигурации агента.
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
+
     /// Максимальное число будущих раундов инструментов.
     #[arg(long, value_name = "N")]
     pub max_tool_rounds: Option<usize>,
@@ -31,6 +39,10 @@ pub struct Cli {
     /// Тайм-аут будущих HTTP-запросов в секундах.
     #[arg(long, value_name = "SECONDS")]
     pub request_timeout_secs: Option<u64>,
+
+    /// Разрешает инструменту write_file изменять файлы внутри working-dir.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub allow_write: bool,
 
     /// Включает диагностический вывод конфигурации.
     #[arg(short, long, action = ArgAction::SetTrue)]
@@ -51,6 +63,19 @@ pub enum ReplCommand {
     Clear,
     /// Показать состояние текущей сессии.
     Status,
+    Tools,
+    Config,
+    Permissions,
+    Save,
+    Load,
+    Index(Option<String>),
+    Search(String),
+    /// Показать модели, доступные через LLM endpoint.
+    Models,
+    Agents,
+    Agent(Option<String>),
+    Skills,
+    Skill(String),
     /// Изменить имя модели текущей сессии.
     Model(String),
     /// Добавить обычный пользовательский prompt.
@@ -81,6 +106,20 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
         "/exit" | "/quit" => ReplCommand::Quit,
         "/clear" => ReplCommand::Clear,
         "/status" => ReplCommand::Status,
+        "/tools" => ReplCommand::Tools,
+        "/config" => ReplCommand::Config,
+        "/permissions" => ReplCommand::Permissions,
+        "/save" => ReplCommand::Save,
+        "/load" => ReplCommand::Load,
+        "/index" => ReplCommand::Index((!argument.is_empty()).then(|| argument.to_owned())),
+        "/search" if !argument.is_empty() => ReplCommand::Search(argument.to_owned()),
+        "/search" => ReplCommand::Unknown(input.to_owned()),
+        "/models" => ReplCommand::Models,
+        "/agents" => ReplCommand::Agents,
+        "/agent" => ReplCommand::Agent((!argument.is_empty()).then(|| argument.to_owned())),
+        "/skills" => ReplCommand::Skills,
+        "/skill" if !argument.is_empty() => ReplCommand::Skill(argument.to_owned()),
+        "/skill" => ReplCommand::Unknown(input.to_owned()),
         "/model" if argument.is_empty() => ReplCommand::Unknown(input.to_owned()),
         "/model" => ReplCommand::Model(argument.to_owned()),
         _ => ReplCommand::Unknown(command.to_owned()),
@@ -89,7 +128,7 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
 
 /// Возвращает текст справки REPL.
 pub fn help_text() -> &'static str {
-    "Команды:\n  /help          показать эту справку\n  /status        показать состояние сессии\n  /model NAME    изменить имя модели\n  /clear         очистить историю\n  /exit, /quit   выйти из REPL\n\nЛюбой другой текст добавляется как сообщение пользователя."
+    "Команды:\n  /help          показать эту справку\n  /status        показать состояние сессии\n  /tools         показать доступные tools\n  /models        показать доступные модели\n  /agents        показать project-local агентов\n  /agent [NAME]  показать или выбрать агента\n  /skills        показать project-local skills\n  /skill NAME    выбрать skill агента\n  /config        показать конфигурацию\n  /permissions   показать permissions\n  /index         построить/обновить индекс проекта\n  /index status  показать состояние индекса\n  /search QUERY  поиск по индексированным фрагментам\n  /model NAME    изменить имя модели\n  /clear         очистить историю\n  /save, /load   сохранить/загрузить историю\n  /exit, /quit   выйти из REPL\n\nКонфигурация агентов и skills хранится в .aiagent/.\nЛюбой другой текст добавляется как сообщение пользователя."
 }
 
 #[cfg(test)]
@@ -114,11 +153,14 @@ mod tests {
         assert_eq!(
             cli,
             Cli {
+                provider: None,
                 model: Some("local-model".to_owned()),
                 base_url: None,
                 working_dir: Some(PathBuf::from("/tmp/project")),
+                config: None,
                 max_tool_rounds: None,
                 request_timeout_secs: None,
+                allow_write: false,
                 verbose: Some(true),
                 prompt: Some("Изучи проект".to_owned()),
             }
@@ -130,6 +172,7 @@ mod tests {
         assert_eq!(parse_repl_command("/help"), ReplCommand::Help);
         assert_eq!(parse_repl_command("/exit"), ReplCommand::Quit);
         assert_eq!(parse_repl_command("/quit"), ReplCommand::Quit);
+        assert_eq!(parse_repl_command("/models"), ReplCommand::Models);
         assert_eq!(
             parse_repl_command("/model local"),
             ReplCommand::Model("local".to_owned())

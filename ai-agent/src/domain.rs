@@ -25,6 +25,16 @@ pub enum Role {
 pub struct Message {
     role: Role,
     content: String,
+    tool_calls: Option<Vec<ToolCallMessage>>,
+    tool_call_id: Option<String>,
+}
+
+/// Минимальные данные вызова инструмента, сохраняемые в истории сессии.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallMessage {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
 }
 
 impl Message {
@@ -35,7 +45,44 @@ impl Message {
             return Err(AppError::EmptyMessage);
         }
 
-        Ok(Self { role, content })
+        Ok(Self {
+            role,
+            content,
+            tool_calls: None,
+            tool_call_id: None,
+        })
+    }
+
+    /// Создаёт assistant-сообщение, содержащее вызовы инструментов.
+    pub fn assistant_tool_calls(
+        content: Option<String>,
+        tool_calls: Vec<ToolCallMessage>,
+    ) -> Result<Self, AppError> {
+        if tool_calls.is_empty() {
+            return Err(AppError::LlmResponse(
+                "assistant tool_calls пусты".to_owned(),
+            ));
+        }
+        Ok(Self {
+            role: Role::Assistant,
+            content: content.unwrap_or_default(),
+            tool_calls: Some(tool_calls),
+            tool_call_id: None,
+        })
+    }
+
+    /// Создаёт tool-сообщение с идентификатором вызова.
+    pub fn tool_result(
+        tool_call_id: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Result<Self, AppError> {
+        let content = content.into();
+        Ok(Self {
+            role: Role::Tool,
+            content,
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.into()),
+        })
     }
 
     /// Возвращает роль сообщения без передачи владения.
@@ -46,6 +93,14 @@ impl Message {
     /// Возвращает текст сообщения как заимствованную строку.
     pub fn content(&self) -> &str {
         &self.content
+    }
+
+    pub fn tool_calls(&self) -> Option<&[ToolCallMessage]> {
+        self.tool_calls.as_deref()
+    }
+
+    pub fn tool_call_id(&self) -> Option<&str> {
+        self.tool_call_id.as_deref()
     }
 }
 
@@ -120,6 +175,19 @@ impl Session {
         self.messages.clear();
         count
     }
+
+    pub fn save_to(&self, path: impl AsRef<Path>) -> Result<(), AppError> {
+        let data = serde_json::to_vec_pretty(self)
+            .map_err(|error| AppError::SessionPersistence(error.to_string()))?;
+        std::fs::write(path, data).map_err(|error| AppError::SessionPersistence(error.to_string()))
+    }
+
+    pub fn load_from(path: impl AsRef<Path>) -> Result<Self, AppError> {
+        let data =
+            std::fs::read(path).map_err(|error| AppError::SessionPersistence(error.to_string()))?;
+        serde_json::from_slice(&data)
+            .map_err(|error| AppError::SessionPersistence(error.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -153,6 +221,25 @@ mod tests {
         assert_eq!(session.add_message(second), 2);
         assert_eq!(session.messages()[0].role(), Role::System);
         assert_eq!(session.messages()[1].content(), "Привет");
+    }
+
+    #[test]
+    fn preserves_tool_call_metadata_in_session_messages() {
+        let assistant = Message::assistant_tool_calls(
+            None,
+            vec![super::ToolCallMessage {
+                id: "call-1".to_owned(),
+                name: "read_file".to_owned(),
+                arguments: "{\"path\":\"README.md\"}".to_owned(),
+            }],
+        )
+        .unwrap();
+        let tool = Message::tool_result("call-1", "content").unwrap();
+
+        assert_eq!(assistant.role(), Role::Assistant);
+        assert_eq!(assistant.tool_calls().unwrap()[0].id, "call-1");
+        assert_eq!(tool.role(), Role::Tool);
+        assert_eq!(tool.tool_call_id(), Some("call-1"));
     }
 
     #[test]

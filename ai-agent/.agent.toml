@@ -1,0 +1,22 @@
+[agent]
+# Максимум итераций LLM -> tool -> LLM.
+max_tool_rounds = 20
+
+# Запись файлов должна быть разрешена отдельно.
+allow_write = true
+
+# Оставьте только tools, которыми агент действительно должен пользоваться.
+enabled_tools = [
+    "read_file", 
+    "list_directory", 
+    "write_file",    
+    "search_files", 
+    "read_lines", 
+    "project_search"
+    ]
+
+# Команды должны быть перечислены явно; по умолчанию run_command недоступен.
+command_allowlist = []
+
+# Запрашивать подтверждение перед записью в интерактивном REPL.
+confirm_writes = true

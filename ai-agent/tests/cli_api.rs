@@ -25,4 +25,5 @@ fn public_repl_parser_supports_session_commands() {
     assert_eq!(parse_repl_command("/clear"), ReplCommand::Clear);
     assert_eq!(parse_repl_command("/status"), ReplCommand::Status);
     assert_eq!(parse_repl_command("/quit"), ReplCommand::Quit);
+    assert_eq!(parse_repl_command("/models"), ReplCommand::Models);
 }
