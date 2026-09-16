@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
 
 /// Аргументы запуска приложения.
 #[derive(Debug, Parser, PartialEq, Eq)]
@@ -13,16 +13,28 @@ use clap::Parser;
 )]
 pub struct Cli {
     /// Имя модели, которое будет сохранено в сессии.
-    #[arg(long, default_value = "demo-model")]
-    pub model: String,
+    #[arg(long)]
+    pub model: Option<String>,
+
+    /// Совместимый OpenAI/LiteLLM base URL.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
 
     /// Рабочая директория сессии.
-    #[arg(long, value_name = "PATH", default_value = ".")]
-    pub working_dir: PathBuf,
+    #[arg(long, value_name = "PATH")]
+    pub working_dir: Option<PathBuf>,
+
+    /// Максимальное число будущих раундов инструментов.
+    #[arg(long, value_name = "N")]
+    pub max_tool_rounds: Option<usize>,
+
+    /// Тайм-аут будущих HTTP-запросов в секундах.
+    #[arg(long, value_name = "SECONDS")]
+    pub request_timeout_secs: Option<u64>,
 
     /// Включает диагностический вывод конфигурации.
-    #[arg(short, long)]
-    pub verbose: bool,
+    #[arg(short, long, action = ArgAction::SetTrue)]
+    pub verbose: Option<bool>,
 
     /// Одноразовый prompt. Если не указан, запускается REPL.
     pub prompt: Option<String>,
@@ -102,9 +114,12 @@ mod tests {
         assert_eq!(
             cli,
             Cli {
-                model: "local-model".to_owned(),
-                working_dir: PathBuf::from("/tmp/project"),
-                verbose: true,
+                model: Some("local-model".to_owned()),
+                base_url: None,
+                working_dir: Some(PathBuf::from("/tmp/project")),
+                max_tool_rounds: None,
+                request_timeout_secs: None,
+                verbose: Some(true),
                 prompt: Some("Изучи проект".to_owned()),
             }
         );

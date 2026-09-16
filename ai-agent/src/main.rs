@@ -3,13 +3,20 @@
 use std::io::{self, BufRead, Write};
 
 use ai_agent::cli::{Cli, ReplCommand, help_text, parse_repl_command};
-use ai_agent::{Message, Role, Session};
+use ai_agent::{Config, Message, Role, Session};
 use clap::Parser;
 
 fn main() {
     let cli = Cli::parse();
+    let config = match Config::load(&cli) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("Ошибка конфигурации: {error}");
+            return;
+        }
+    };
 
-    let mut session = match Session::new(&cli.working_dir, &cli.model) {
+    let mut session = match Session::new(&config.working_dir, &config.model) {
         Ok(session) => session,
         Err(error) => {
             eprintln!("Ошибка создания сессии: {error}");
@@ -18,9 +25,9 @@ fn main() {
     };
 
     if let Some(prompt) = cli.prompt {
-        run_once(&mut session, &prompt, cli.verbose);
+        run_once(&mut session, &prompt, config.verbose);
     } else {
-        run_repl(&mut session, cli.verbose);
+        run_repl(&mut session, config.verbose);
     }
 }
 

@@ -5,10 +5,12 @@
 //! интеграционные тесты.
 
 pub mod cli;
+pub mod config;
 pub mod domain;
 pub mod error;
 pub mod word_processing;
 
+pub use config::Config;
 pub use domain::{Message, Role, Session};
 pub use error::AppError;
 pub use word_processing::{count_items, count_unique_words, first_item, parse_words};

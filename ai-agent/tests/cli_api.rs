@@ -15,8 +15,8 @@ fn public_cli_api_parses_prompt_and_configuration() {
     ])
     .unwrap();
 
-    assert_eq!(cli.working_dir, PathBuf::from("workspace"));
-    assert_eq!(cli.model, "test-model");
+    assert_eq!(cli.working_dir, Some(PathBuf::from("workspace")));
+    assert_eq!(cli.model, Some("test-model".to_owned()));
     assert_eq!(cli.prompt.as_deref(), Some("просмотри файлы"));
 }
 
