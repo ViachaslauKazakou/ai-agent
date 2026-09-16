@@ -1,6 +1,9 @@
 //! Консольная точка входа учебного AI-агента.
 
-use std::io::{self, BufRead, Write};
+use std::{
+    io::{self, BufRead, Write},
+    time::Instant,
+};
 
 use ai_agent::cli::{Cli, ReplCommand, help_text, parse_repl_command};
 use ai_agent::{
@@ -81,7 +84,7 @@ async fn run_once(
     if config.verbose {
         print_status(session);
     }
-    request_completion(session, provider, config, profile, catalog, prompt).await;
+    request_completion(session, provider, config, profile, catalog, prompt, true).await;
 }
 
 async fn run_repl(
@@ -91,10 +94,8 @@ async fn run_repl(
     catalog: AgentCatalog,
     mut active_profile: AgentProfile,
 ) {
-    println!(
-        "Учебный AI-агент ({}). Введите /help для справки.",
-        config.provider
-    );
+    let mut show_stats = true;
+    print_banner(&config.provider, &active_profile.model, show_stats);
     if config.verbose {
         print_status(session);
     }
@@ -102,7 +103,7 @@ async fn run_repl(
     let stdin = io::stdin();
     let mut input = String::new();
     loop {
-        print!("agent> ");
+        print!("\x1b[1;36m❯\x1b[0m ");
         if let Err(error) = io::stdout().flush() {
             eprintln!("Ошибка вывода приглашения: {error}");
             return;
@@ -233,9 +234,36 @@ async fn run_repl(
                     Err(error) => println!("Сначала выполните /index: {error}"),
                 }
             }
-            ReplCommand::Model(model) => match session.set_model(model) {
-                Ok(()) => println!("Модель изменена: {}", session.model()),
+            ReplCommand::Model(Some(model)) => match session.set_model(model) {
+                Ok(()) => println!(
+                    "\x1b[32m✓\x1b[0m Модель изменена: \x1b[1m{}\x1b[0m",
+                    session.model()
+                ),
                 Err(error) => println!("Ошибка модели: {error}"),
+            },
+            ReplCommand::Model(None) => {
+                println!("Текущая модель: \x1b[1m{}\x1b[0m", session.model())
+            }
+            ReplCommand::Stats(setting) => match setting.as_deref() {
+                Some("on") => {
+                    show_stats = true;
+                    println!("\x1b[32m✓\x1b[0m Статистика включена.");
+                }
+                Some("off") => {
+                    show_stats = false;
+                    println!("\x1b[33m✓\x1b[0m Статистика выключена.");
+                }
+                Some(value) => println!(
+                    "Неизвестная настройка: {value}. Используйте /stats on или /stats off."
+                ),
+                None => println!(
+                    "Статистика: {}",
+                    if show_stats {
+                        "включена"
+                    } else {
+                        "выключена"
+                    }
+                ),
             },
             ReplCommand::Prompt(prompt) => {
                 request_completion(
@@ -245,6 +273,7 @@ async fn run_repl(
                     &active_profile,
                     &catalog,
                     &prompt,
+                    show_stats,
                 )
                 .await;
             }
@@ -263,6 +292,7 @@ async fn request_completion(
     profile: &AgentProfile,
     catalog: &AgentCatalog,
     prompt: &str,
+    show_stats: bool,
 ) {
     let registry = match registry_from_names(&profile.enabled_tools) {
         Ok(registry) => registry,
@@ -284,15 +314,61 @@ async fn request_completion(
     };
     let mut agent = Agent::new(provider, registry, context, profile.max_tool_rounds)
         .with_system_prompt(system_prompt);
+    let started = Instant::now();
+    println!("\n\x1b[2m┌─ Вы запрашиваете\x1b[0m");
+    println!("\x1b[2m│\x1b[0m {prompt}");
+    println!("\x1b[2m└─ Ответ\x1b[0m\n");
     match agent.complete(session, prompt).await {
         Ok(response) => {
-            println!("Assistant: {}", response.content);
+            println!("\x1b[1;32m◆ Assistant\x1b[0m\n{}", response.content);
+            if show_stats {
+                print_response_stats(response.usage.as_ref(), started.elapsed().as_secs_f64());
+            }
             if let Err(error) = session.save_to(session_path(session)) {
                 eprintln!("Предупреждение: не удалось сохранить сессию: {error}");
             }
         }
         Err(error) => eprintln!("Ошибка агента: {error}"),
     }
+}
+
+fn print_banner(provider: &str, model: &str, show_stats: bool) {
+    println!("\n\x1b[1;35m╭────────────────────────────────────────╮\x1b[0m");
+    println!("\x1b[1;35m│\x1b[0m  \x1b[1mAI Agent\x1b[0m  ·  \x1b[36m{provider}\x1b[0m");
+    println!("\x1b[1;35m│\x1b[0m  Модель: \x1b[1m{model}\x1b[0m");
+    println!(
+        "\x1b[1;35m│\x1b[0m  Статистика: {}  ·  /help для команд",
+        if show_stats { "on" } else { "off" }
+    );
+    println!("\x1b[1;35m╰────────────────────────────────────────╯\x1b[0m\n");
+}
+
+fn print_response_stats(usage: Option<&ai_agent::Usage>, elapsed_secs: f64) {
+    let tokens = usage.and_then(|value| value.total_tokens);
+    let prompt_tokens = usage.and_then(|value| value.prompt_tokens);
+    let completion_tokens = usage.and_then(|value| value.completion_tokens);
+    match (tokens, prompt_tokens, completion_tokens) {
+        (Some(total), Some(prompt), Some(completion)) => println!(
+            "\n\x1b[2m↳ {} токенов ({} prompt + {} ответ) · {:.2} с\x1b[0m\n",
+            format_number(total),
+            format_number(prompt),
+            format_number(completion),
+            elapsed_secs
+        ),
+        _ => println!("\n\x1b[2m↳ токены: н/д · {:.2} с\x1b[0m\n", elapsed_secs),
+    }
+}
+
+fn format_number(value: u32) -> String {
+    let digits = value.to_string();
+    let mut result = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            result.push(' ');
+        }
+        result.push(digit);
+    }
+    result
 }
 
 #[derive(Clone)]

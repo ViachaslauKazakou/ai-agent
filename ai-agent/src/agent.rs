@@ -3,13 +3,14 @@
 use serde_json::Value;
 
 use crate::tools::{ToolContext, ToolRegistry};
-use crate::{AppError, CompletionRequest, LlmMessage, LlmProvider, Message, Role, Session};
+use crate::{AppError, CompletionRequest, LlmMessage, LlmProvider, Message, Role, Session, Usage};
 
 /// Результат обработки пользовательского prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentResponse {
     pub content: String,
     pub tool_rounds: usize,
+    pub usage: Option<Usage>,
 }
 
 /// Координатор LLM и зарегистрированных инструментов.
@@ -71,6 +72,12 @@ impl<P: LlmProvider> Agent<P> {
         session.add_message(user.clone());
         self.messages.push(LlmMessage::from_message(&user));
 
+        let mut usage = Usage {
+            prompt_tokens: Some(0),
+            completion_tokens: Some(0),
+            total_tokens: Some(0),
+        };
+        let mut has_usage = false;
         for round in 0..self.max_tool_rounds {
             let request = CompletionRequest::from_llm_messages(
                 session.model(),
@@ -78,6 +85,10 @@ impl<P: LlmProvider> Agent<P> {
                 self.registry.definitions(),
             );
             let response = self.provider.complete(request).await?;
+            if let Some(response_usage) = &response.usage {
+                usage.add_assign(response_usage);
+                has_usage = true;
+            }
             self.messages.push(response.message.clone());
 
             let Some(tool_calls) = response.message.tool_calls.clone() else {
@@ -91,6 +102,7 @@ impl<P: LlmProvider> Agent<P> {
                 return Ok(AgentResponse {
                     content,
                     tool_rounds: round,
+                    usage: has_usage.then_some(usage),
                 });
             };
 
