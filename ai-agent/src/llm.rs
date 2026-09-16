@@ -181,6 +181,21 @@ pub struct Usage {
     pub total_tokens: Option<u32>,
 }
 
+impl Usage {
+    pub fn add_assign(&mut self, other: &Usage) {
+        self.prompt_tokens = add_optional(self.prompt_tokens, other.prompt_tokens);
+        self.completion_tokens = add_optional(self.completion_tokens, other.completion_tokens);
+        self.total_tokens = add_optional(self.total_tokens, other.total_tokens);
+    }
+}
+
+fn add_optional(left: Option<u32>, right: Option<u32>) -> Option<u32> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        _ => None,
+    }
+}
+
 /// Внутренний ответ одного completion choice.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 struct ApiChoice {
