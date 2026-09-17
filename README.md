@@ -37,6 +37,28 @@ Device-code flow выводит URL и код в терминал. Refresh token
 Secret Service); в `.env`, `.agent-session.json` и логах он не записывается.
 Для CI/mock HTTP допускается временный `MICROSOFT_GRAPH_ACCESS_TOKEN`.
 
+### Gmail
+
+Для Gmail используется OAuth 2.0 Authorization Code + PKCE с локальным callback
+на `127.0.0.1:8765`. Создайте в Google Cloud проект, включите Gmail API и
+создайте OAuth Client ID типа **Desktop app**. Значение client ID задайте в
+`GOOGLE_GMAIL_CLIENT_ID`, затем выполните:
+
+```bash
+cargo run -- --gmail-login
+```
+
+Ссылка откроется в браузере/терминале. Refresh token сохраняется только в
+системном credential store под сервисом `ai-agent.gmail`; пароль Gmail и
+client secret приложению не нужны. Доступ ограничен read-only scope
+`gmail.readonly`. Если `GOOGLE_GMAIL_CLIENT_ID` задан, email tools используют
+Gmail; иначе они используют Microsoft Graph.
+
+Gmail поддерживает тот же набор read-only tools: `list_recent_emails`,
+`get_email` и `search_emails`. Параметр `query` передаётся как Gmail search
+query (например, `from:alice@example.com is:unread`), а ограничение периода
+добавляется как `newer_than:Nh`.
+
 `get_email` и email search results передаются текущему LLM, но помечены ephemeral и
 не сохраняются в persistent session history. Scheduler запускается так:
 

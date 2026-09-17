@@ -62,6 +62,10 @@ pub struct Cli {
     /// Выполнить Microsoft device-code login и сохранить refresh token в OS keychain.
     #[arg(long, action = ArgAction::SetTrue)]
     pub graph_login: bool,
+
+    /// Выполнить Gmail OAuth login и сохранить refresh token в OS keychain.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub gmail_login: bool,
 }
 
 /// Команда, распознанная внутри REPL.
@@ -181,6 +185,7 @@ mod tests {
                 scheduler: false,
                 schedule_file: PathBuf::from(".aiagent/schedules.toml"),
                 graph_login: false,
+                gmail_login: false,
             }
         );
     }

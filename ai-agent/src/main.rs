@@ -39,6 +39,18 @@ async fn main() {
         }
         return;
     }
+    if cli.gmail_login {
+        match ai_agent::connectors::gmail_auth::GmailAuth::from_env(Duration::from_secs(
+            config.request_timeout_secs,
+        )) {
+            Ok(auth) => match auth.login().await {
+                Ok(()) => println!("Gmail авторизация завершена."),
+                Err(error) => eprintln!("Ошибка Gmail login: {error}"),
+            },
+            Err(error) => eprintln!("Ошибка Gmail login: {error}"),
+        }
+        return;
+    }
 
     let mut session = match Session::new(&config.working_dir, &config.model) {
         Ok(session) => session,
@@ -414,6 +426,7 @@ async fn request_completion(
     context.interactive = true;
     context.graph_base_url = std::env::var("MICROSOFT_GRAPH_BASE_URL").ok();
     context.graph_access_token = std::env::var("MICROSOFT_GRAPH_ACCESS_TOKEN").ok();
+    context.gmail_client_id = std::env::var("GOOGLE_GMAIL_CLIENT_ID").ok();
     let system_prompt = match catalog.system_prompt(profile) {
         Ok(prompt) => prompt,
         Err(error) => {

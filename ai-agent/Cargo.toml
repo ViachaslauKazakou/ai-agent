@@ -31,3 +31,5 @@ chrono = { version = "0.4", features = ["clock", "serde"] }
 cron = "0.15"
 urlencoding = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+base64 = "0.22"
+sha2 = "0.10"

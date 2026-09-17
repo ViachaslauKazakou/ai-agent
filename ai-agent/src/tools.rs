@@ -28,6 +28,7 @@ pub struct ToolContext {
     /// Read-only Microsoft Graph connection settings; token is never serialized.
     pub graph_base_url: Option<String>,
     pub graph_access_token: Option<String>,
+    pub gmail_client_id: Option<String>,
 }
 
 impl ToolContext {
@@ -42,6 +43,7 @@ impl ToolContext {
             max_result_bytes: 50_000,
             graph_base_url: None,
             graph_access_token: None,
+            gmail_client_id: None,
         }
     }
 

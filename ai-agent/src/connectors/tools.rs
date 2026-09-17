@@ -1,4 +1,6 @@
 use super::auth::GraphAuth;
+use super::gmail::GmailMailClient;
+use super::gmail_auth::GmailAuth;
 use super::{GraphMailClient, MessageQuery, MessageSource};
 use crate::{
     AppError,
@@ -21,6 +23,16 @@ fn client(context: &ToolContext) -> Result<GraphMailClient, AppError> {
     } else {
         Ok(client)
     }
+}
+fn source(context: &ToolContext) -> Result<Box<dyn MessageSource>, AppError> {
+    if context.gmail_client_id.is_some() {
+        let auth = GmailAuth::from_env(std::time::Duration::from_secs(30))?;
+        return Ok(Box::new(GmailMailClient::new(
+            auth,
+            std::time::Duration::from_secs(30),
+        )?));
+    }
+    Ok(Box::new(client(context)?))
 }
 fn query(args: &Value, body: bool) -> MessageQuery {
     MessageQuery {
@@ -52,7 +64,7 @@ impl Tool for ListRecentEmails {
         json!({"type":"object","properties":{"lookback_hours":{"type":"integer","minimum":1,"maximum":720},"max_messages":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false})
     }
     async fn execute(&self, args: Value, context: &ToolContext) -> Result<ToolResult, AppError> {
-        let messages = client(context)?.list_messages(&query(&args, false)).await?;
+        let messages = source(context)?.list_messages(&query(&args, false)).await?;
         Ok(ToolResult {
             success: true,
             content: serde_json::to_string_pretty(&messages).unwrap_or_default(),
@@ -80,7 +92,7 @@ impl Tool for GetEmail {
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| AppError::Tool("get_email требует id".into()))?;
-        let message = client(context)?.get_message(id).await?;
+        let message = source(context)?.get_message(id).await?;
         Ok(ToolResult {
             success: true,
             content: serde_json::to_string_pretty(&message).unwrap_or_default(),
@@ -104,7 +116,7 @@ impl Tool for SearchEmails {
         json!({"type":"object","properties":{"query":{"type":"string"},"max_messages":{"type":"integer","minimum":1,"maximum":100}},"required":["query"],"additionalProperties":false})
     }
     async fn execute(&self, args: Value, context: &ToolContext) -> Result<ToolResult, AppError> {
-        let messages = client(context)?.list_messages(&query(&args, false)).await?;
+        let messages = source(context)?.list_messages(&query(&args, false)).await?;
         Ok(ToolResult {
             success: true,
             content: serde_json::to_string_pretty(&messages).unwrap_or_default(),
