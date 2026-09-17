@@ -21,6 +21,7 @@ pub struct Agent<P> {
     max_tool_rounds: usize,
     messages: Vec<LlmMessage>,
     system_prompt: Option<String>,
+    tools_enabled: bool,
 }
 
 impl<P: LlmProvider> Agent<P> {
@@ -37,11 +38,18 @@ impl<P: LlmProvider> Agent<P> {
             max_tool_rounds,
             messages: Vec::new(),
             system_prompt: None,
+            tools_enabled: true,
         }
     }
 
     pub fn with_system_prompt(mut self, system_prompt: String) -> Self {
         self.system_prompt = Some(system_prompt);
+        self
+    }
+
+    /// Включает или выключает передачу tool definitions в LLM.
+    pub fn with_tools_enabled(mut self, tools_enabled: bool) -> Self {
+        self.tools_enabled = tools_enabled;
         self
     }
 
@@ -82,7 +90,11 @@ impl<P: LlmProvider> Agent<P> {
             let request = CompletionRequest::from_llm_messages(
                 session.model(),
                 self.messages.clone(),
-                self.registry.definitions(),
+                if self.tools_enabled {
+                    self.registry.definitions()
+                } else {
+                    Vec::new()
+                },
             );
             let response = self.provider.complete(request).await?;
             if let Some(response_usage) = &response.usage {

@@ -34,6 +34,24 @@ fn public_config_api_does_not_expose_api_key_in_debug() {
 }
 
 #[test]
+fn public_config_api_formats_readable_json_without_api_key() {
+    let cli = Cli::try_parse_from(["ai-agent", "--working-dir", "."]).unwrap();
+    let environment = HashMap::from([(
+        String::from("LITELLM_API_KEY"),
+        String::from("secret-value"),
+    )]);
+    let config = Config::from_sources(&cli, &environment).unwrap();
+
+    let json = config.to_pretty_json();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(value["provider"], "litellm");
+    assert_eq!(value["api_key"], "<redacted>");
+    assert!(!json.contains("secret-value"));
+    assert!(json.contains("\n"));
+}
+
+#[test]
 fn public_config_api_reports_invalid_path() {
     let cli = Cli::try_parse_from(["ai-agent", "--working-dir", "/does/not/exist"]).unwrap();
 

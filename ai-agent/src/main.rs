@@ -84,7 +84,10 @@ async fn run_once(
     if config.verbose {
         print_status(session);
     }
-    request_completion(session, provider, config, profile, catalog, prompt, true).await;
+    request_completion(
+        session, provider, config, profile, catalog, prompt, true, true,
+    )
+    .await;
 }
 
 async fn run_repl(
@@ -95,6 +98,7 @@ async fn run_repl(
     mut active_profile: AgentProfile,
 ) {
     let mut show_stats = true;
+    let mut tools_enabled = true;
     print_banner(&config.provider, &active_profile.model, show_stats);
     if config.verbose {
         print_status(session);
@@ -132,7 +136,28 @@ async fn run_repl(
                 println!("История очищена: {} сообщений.", session.clear_messages());
             }
             ReplCommand::Status => print_status(session),
-            ReplCommand::Tools => println!("Доступные tools: {}", config.enabled_tools.join(", ")),
+            ReplCommand::Tools(argument) => match argument.as_deref() {
+                None => println!(
+                    "Tools: {}\nДоступные tools: {}",
+                    if tools_enabled {
+                        "включены"
+                    } else {
+                        "выключены"
+                    },
+                    config.enabled_tools.join(", ")
+                ),
+                Some("on") => {
+                    tools_enabled = true;
+                    println!("Tools включены для следующих запросов.");
+                }
+                Some("off") => {
+                    tools_enabled = false;
+                    println!("Tools выключены для следующих запросов.");
+                }
+                Some(value) => println!(
+                    "Неизвестный режим tools: {value}. Используйте /tools on или /tools off."
+                ),
+            },
             ReplCommand::Models => match provider.list_models().await {
                 Ok(models) if models.is_empty() => println!("Доступные модели не найдены."),
                 Ok(models) => {
@@ -184,7 +209,7 @@ async fn run_repl(
                     println!("Неизвестный skill: {name}");
                 }
             }
-            ReplCommand::Config => println!("Конфигурация: {config:?}"),
+            ReplCommand::Config => println!("{}", config.to_pretty_json()),
             ReplCommand::Permissions => println!(
                 "allow_write={}, confirm_writes={}, command_allowlist={:?}",
                 config.allow_write, config.confirm_writes, config.command_allowlist
@@ -274,6 +299,7 @@ async fn run_repl(
                     &catalog,
                     &prompt,
                     show_stats,
+                    tools_enabled,
                 )
                 .await;
             }
@@ -285,6 +311,7 @@ async fn run_repl(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn request_completion(
     session: &mut Session,
     provider: ConfiguredProvider,
@@ -293,6 +320,7 @@ async fn request_completion(
     catalog: &AgentCatalog,
     prompt: &str,
     show_stats: bool,
+    tools_enabled: bool,
 ) {
     let registry = match registry_from_names(&profile.enabled_tools) {
         Ok(registry) => registry,
@@ -313,7 +341,8 @@ async fn request_completion(
         }
     };
     let mut agent = Agent::new(provider, registry, context, profile.max_tool_rounds)
-        .with_system_prompt(system_prompt);
+        .with_system_prompt(system_prompt)
+        .with_tools_enabled(tools_enabled);
     let started = Instant::now();
     println!("\n\x1b[2m┌─ Вы запрашиваете\x1b[0m");
     println!("\x1b[2m│\x1b[0m {prompt}");
