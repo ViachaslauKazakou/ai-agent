@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::{ArgAction, Parser};
 
 /// Аргументы запуска приложения.
-#[derive(Debug, Parser, PartialEq, Eq)]
+#[derive(Clone, Debug, Parser, PartialEq, Eq)]
 #[command(
     name = "ai-agent",
     version,
@@ -27,6 +27,10 @@ pub struct Cli {
     /// Рабочая директория сессии.
     #[arg(long, value_name = "PATH")]
     pub working_dir: Option<PathBuf>,
+
+    /// Каталог проекта с `.env`, `.agent.toml` и `.aiagent`.
+    #[arg(long, value_name = "PATH")]
+    pub project_dir: Option<PathBuf>,
 
     /// Путь к TOML-конфигурации агента.
     #[arg(long, value_name = "PATH")]
@@ -176,6 +180,7 @@ mod tests {
                 model: Some("local-model".to_owned()),
                 base_url: None,
                 working_dir: Some(PathBuf::from("/tmp/project")),
+                project_dir: None,
                 config: None,
                 max_tool_rounds: None,
                 request_timeout_secs: None,
