@@ -84,6 +84,28 @@ impl fmt::Debug for Config {
 }
 
 impl Config {
+    /// Возвращает безопасное читаемое JSON-представление конфигурации.
+    /// Секрет API намеренно заменяется на `<redacted>`.
+    pub fn to_pretty_json(&self) -> String {
+        let value = serde_json::json!({
+            "provider": self.provider,
+            "api_base_url": self.api_base_url,
+            "api_key": self.api_key.as_ref().map(|_| "<redacted>"),
+            "model": self.model,
+            "working_dir": self.working_dir,
+            "max_tool_rounds": self.max_tool_rounds,
+            "request_timeout_secs": self.request_timeout_secs,
+            "log_level": self.log_level,
+            "verbose": self.verbose,
+            "allow_write": self.allow_write,
+            "enabled_tools": self.enabled_tools,
+            "command_allowlist": self.command_allowlist,
+            "confirm_writes": self.confirm_writes,
+        });
+
+        serde_json::to_string_pretty(&value).expect("configuration JSON should be serializable")
+    }
+
     /// Загружает `.env`, затем применяет переменные процесса и CLI.
     pub fn load(cli: &Cli) -> Result<Self, AppError> {
         match dotenvy::dotenv() {

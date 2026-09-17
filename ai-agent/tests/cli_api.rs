@@ -24,6 +24,11 @@ fn public_cli_api_parses_prompt_and_configuration() {
 fn public_repl_parser_supports_session_commands() {
     assert_eq!(parse_repl_command("/clear"), ReplCommand::Clear);
     assert_eq!(parse_repl_command("/status"), ReplCommand::Status);
+    assert_eq!(parse_repl_command("/tools"), ReplCommand::Tools(None));
+    assert_eq!(
+        parse_repl_command("/tools off"),
+        ReplCommand::Tools(Some("off".to_owned()))
+    );
     assert_eq!(parse_repl_command("/quit"), ReplCommand::Quit);
     assert_eq!(parse_repl_command("/models"), ReplCommand::Models);
     assert_eq!(parse_repl_command("/model"), ReplCommand::Model(None));
