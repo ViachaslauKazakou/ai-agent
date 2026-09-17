@@ -127,7 +127,7 @@ impl<P: LlmProvider> Agent<P> {
                     Ok(args) => args,
                     Err(error) => {
                         let content = format!("Некорректные JSON-аргументы: {error}");
-                        self.push_tool_result(session, &call.id, content.clone());
+                        self.push_tool_result(session, &call.id, content.clone(), true);
                         continue;
                     }
                 };
@@ -135,21 +135,27 @@ impl<P: LlmProvider> Agent<P> {
                     .registry
                     .execute(&call.function.name, args, &self.context)
                     .await;
-                let content = match result {
-                    Ok(result) => result.content,
-                    Err(error) => error.to_string(),
+                let (content, persist) = match result {
+                    Ok(result) => (result.content, !result.ephemeral),
+                    Err(error) => (error.to_string(), true),
                 };
-                self.push_tool_result(session, &call.id, content);
+                self.push_tool_result(session, &call.id, content, persist);
             }
         }
 
         Err(AppError::ToolRoundLimit(self.max_tool_rounds))
     }
 
-    fn push_tool_result(&mut self, session: &mut Session, id: &str, content: String) {
+    fn push_tool_result(
+        &mut self,
+        session: &mut Session,
+        id: &str,
+        content: String,
+        persist: bool,
+    ) {
         self.messages
             .push(LlmMessage::tool_result(id, content.clone()));
-        if let Ok(message) = Message::tool_result(id, content) {
+        if persist && let Ok(message) = Message::tool_result(id, content) {
             session.add_message(message);
         }
     }

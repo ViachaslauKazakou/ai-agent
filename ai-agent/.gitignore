@@ -1,3 +1,7 @@
 .env
 .agent/
 .agent-session.json
+.DS_Store
+target/
+client_secret_1015478987436-1ff38hk8geke1infvpte8v8ppta3t4ao.apps.googleusercontent.com.json
+client_secret_*.apps.googleusercontent.com.json

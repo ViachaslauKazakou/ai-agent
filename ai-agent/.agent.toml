@@ -12,7 +12,10 @@ enabled_tools = [
     "write_file",    
     "search_files", 
     "read_lines", 
-    "project_search"
+    "project_search",
+    "list_recent_emails",
+    "get_email",
+    "search_emails"
     ]
 
 # Команды должны быть перечислены явно; по умолчанию run_command недоступен.

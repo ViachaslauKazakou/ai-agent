@@ -11,7 +11,8 @@
 - одноразовый prompt и интерактивный REPL;
 - сохранение истории в `<working-dir>/.agent-session.json`;
 - tools `read_file`, `list_directory`, `write_file`, `search_files`,
-  `read_lines`, `project_search` и опциональный `run_command`;
+  `read_lines`, `project_search`, read-only email tools
+  `list_recent_emails`, `get_email`, `search_emails` и опциональный `run_command`;
 - ограничение tools списком `enabled_tools`;
 - запись файлов выключена без явного `allow_write = true`;
 - подтверждение записи в интерактивном режиме через `confirm_writes`;
@@ -22,6 +23,160 @@
 - project-local skills в `.aiagent/skills/<name>/SKILL.md`;
 - инкрементальный JSON-индекс проекта в `.agent/index.json`;
 - unit-, integration- и HTTP-клиентские тесты.
+
+## Работа с почтой
+
+Агент умеет читать почту в режиме read-only. Поддерживаются Gmail и Outlook через
+Microsoft Graph. В одном запуске выбирается один источник:
+
+- если `GOOGLE_GMAIL_CLIENT_ID` непустой, используется Gmail;
+- иначе используется Microsoft Graph.
+
+Для включения почтовых инструментов добавьте их в `enabled_tools` файла
+`.agent.toml`:
+
+```toml
+[agent]
+enabled_tools = [
+    "read_file",
+    "list_directory",
+    "search_files",
+    "read_lines",
+    "project_search",
+    "list_recent_emails",
+    "get_email",
+    "search_emails",
+]
+```
+
+Почтовые инструменты не изменяют и не удаляют письма. Результаты чтения помечены
+как ephemeral: они доступны текущему запросу LLM, но не сохраняются в
+`.agent-session.json`.
+
+### Gmail: настройка аккаунта
+
+1. В Google Cloud Console создайте проект, включите **Gmail API** и настройте
+   OAuth consent screen.
+2. Создайте OAuth Client ID типа **Desktop app**.
+3. Скопируйте client ID и, если он указан в JSON credentials, client secret в
+   локальный `ai-agent/.env`:
+
+   ```env
+   GOOGLE_GMAIL_CLIENT_ID=...
+   GOOGLE_GMAIL_CLIENT_SECRET=...
+   ```
+
+4. Выполните авторизацию из каталога `ai-agent`:
+
+   ```bash
+   cargo run -- --gmail-login
+   ```
+
+   При запуске установленного или release-бинарника используйте соответственно:
+
+   ```bash
+   ./target/release/ai-agent --gmail-login
+   # или
+   ai-agent --gmail-login
+   ```
+
+   Откроется браузерная OAuth-страница, а callback будет принят на
+   `127.0.0.1:8765`. После подтверждения Google refresh token сохраняется в
+   системном хранилище учётных данных под сервисом `ai-agent.gmail`.
+
+### Outlook / Microsoft Graph: настройка аккаунта
+
+1. В Microsoft Entra создайте App registration с public client/device-code flow.
+2. Добавьте delegated permissions `Mail.Read`, `User.Read` и `offline_access`.
+3. Запишите client ID в локальный `ai-agent/.env`:
+
+   ```env
+   MICROSOFT_GRAPH_CLIENT_ID=...
+   MICROSOFT_GRAPH_TENANT=common
+   # необязательно:
+   # MICROSOFT_GRAPH_SCOPE=offline_access Mail.Read User.Read
+   ```
+
+4. Выполните авторизацию:
+
+```bash
+cargo run -- --graph-login
+```
+
+Device-code flow выведет URL и код в терминал. Refresh token сохраняется только в
+системном хранилище учётных данных под сервисом
+`ai-agent.microsoft-graph`; в `.env`, `.agent-session.json` и логах он не
+записывается. Для CI/mock HTTP допускается временный
+`MICROSOFT_GRAPH_ACCESS_TOKEN`, но для обычной работы предпочтителен
+`--graph-login`.
+
+### Запуск и примеры запросов
+
+Соберите release-бинарник. По умолчанию агент ищет `.env`, `.agent.toml` и
+`.aiagent/` в текущем каталоге:
+
+```bash
+cargo build --release
+./target/release/ai-agent
+```
+
+Чтобы запускать установленный бинарник из любой папки, укажите каталог проекта:
+
+```bash
+cargo install --path .
+ai-agent --project-dir /absolute/path/to/ai-agent
+```
+
+Для постоянного значения можно задать `AI_AGENT_PROJECT_DIR`:
+
+```bash
+export AI_AGENT_PROJECT_DIR=/absolute/path/to/ai-agent
+ai-agent
+```
+
+`--project-dir` имеет приоритет над `AI_AGENT_PROJECT_DIR`. Если `--working-dir`
+не указан, он совпадает с `project-dir`; отдельный `--working-dir` позволяет
+использовать настройки одного проекта, но работать с другим каталогом.
+
+Примеры запросов:
+
+```text
+Покажи последние письма за 24 часа
+Найди непрочитанные письма
+Найди письма от alice@example.com за последние 7 дней
+Открой письмо с указанным идентификатором и покажи его содержимое
+```
+
+Инструмент `list_recent_emails` принимает период до 720 часов и возвращает
+заголовки с preview. `search_emails` принимает поисковый запрос; для Gmail можно
+использовать Gmail operators, например `from:alice@example.com is:unread`.
+`get_email` загружает тело только для явно выбранного письма.
+
+Если Google возвращает `client_secret is missing`, добавьте secret из JSON-файла
+OAuth client в локальный `.env`:
+
+```env
+GOOGLE_GMAIL_CLIENT_ID=...
+GOOGLE_GMAIL_CLIENT_SECRET=...
+```
+
+Не коммитьте JSON-файл с OAuth credentials. Если secret уже был опубликован,
+отозовите OAuth client в Google Cloud Console и создайте новый.
+
+Чтобы сменить аккаунт, авторизуйтесь с новым OAuth client ID или tenant/client ID.
+Токены разных идентификаторов хранятся в отдельных записях системного
+credential store. Для полного удаления доступа отзовите приложение в Google
+Account/Microsoft Entra и удалите соответствующую запись из системного
+хранилища. Никогда не коммитьте `.env` или JSON-файл OAuth credentials.
+
+Scheduler запускается так:
+
+```bash
+cargo run -- --scheduler --schedule-file .aiagent/schedules.toml
+```
+
+Остановка через Ctrl-C выполняется корректно между job; job выполняются строго
+последовательно.
 
 > Для моделей, которые не поддерживают tool definitions, перед prompt используйте
 > `/tools off`. Автоматический retry после HTTP 400 пока не реализован.
@@ -272,7 +427,7 @@ CLI имеет наивысший приоритет. Для API key испол�
 
 ### `.agent.toml`
 
-Файл `.agent.toml` находится в `working_dir`. Пример — `.agent.toml.example`:
+Файл `.agent.toml` находится в `project_dir`. Пример — `.agent.toml.example`:
 
 ```toml
 [agent]

@@ -106,9 +106,10 @@ impl Config {
         serde_json::to_string_pretty(&value).expect("configuration JSON should be serializable")
     }
 
-    /// Загружает `.env`, затем применяет переменные процесса и CLI.
+    /// Загружает проектные `.env` и `.agent.toml`, затем применяет CLI.
     pub fn load(cli: &Cli) -> Result<Self, AppError> {
-        match dotenvy::dotenv() {
+        let project_dir = resolve_project_dir(cli)?;
+        match dotenvy::from_path(project_dir.join(".env")) {
             Ok(_) => {}
             Err(dotenvy::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(AppError::EnvironmentFile(error.to_string())),
@@ -118,9 +119,18 @@ impl Config {
         let config_path = cli
             .config
             .clone()
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_FILE));
+            .unwrap_or_else(|| project_dir.join(DEFAULT_CONFIG_FILE));
+        let config_path = if config_path.is_absolute() {
+            config_path
+        } else {
+            project_dir.join(config_path)
+        };
         let file = load_file_config(&config_path)?;
-        Self::from_sources_with_file(cli, &environment, file)
+        let mut cli = cli.clone();
+        if cli.working_dir.is_none() {
+            cli.working_dir = Some(project_dir);
+        }
+        Self::from_sources_with_file(&cli, &environment, file)
     }
 
     /// Собирает конфигурацию из defaults, переданного окружения и CLI.
@@ -258,6 +268,15 @@ impl Config {
     }
 }
 
+fn resolve_project_dir(cli: &Cli) -> Result<PathBuf, AppError> {
+    let raw = cli
+        .project_dir
+        .clone()
+        .or_else(|| env::var_os("AI_AGENT_PROJECT_DIR").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("."));
+    absolute_existing_directory(&raw.to_string_lossy())
+}
+
 fn load_file_config(path: &Path) -> Result<FileConfig, AppError> {
     match fs::read_to_string(path) {
         Ok(content) => toml::from_str(&content)
@@ -281,6 +300,9 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
                 | "read_lines"
                 | "project_search"
                 | "run_command"
+                | "list_recent_emails"
+                | "get_email"
+                | "search_emails"
         ) {
             return Err(AppError::UnknownTool(tool.clone()));
         }

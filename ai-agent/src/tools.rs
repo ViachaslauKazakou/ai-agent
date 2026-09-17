@@ -25,6 +25,10 @@ pub struct ToolContext {
     pub interactive: bool,
     pub max_file_bytes: usize,
     pub max_result_bytes: usize,
+    /// Read-only Microsoft Graph connection settings; token is never serialized.
+    pub graph_base_url: Option<String>,
+    pub graph_access_token: Option<String>,
+    pub gmail_client_id: Option<String>,
 }
 
 impl ToolContext {
@@ -37,6 +41,9 @@ impl ToolContext {
             interactive: false,
             max_file_bytes: 1_000_000,
             max_result_bytes: 50_000,
+            graph_base_url: None,
+            graph_access_token: None,
+            gmail_client_id: None,
         }
     }
 
@@ -84,6 +91,8 @@ pub struct ToolResult {
     pub content: String,
     pub structured: Option<Value>,
     pub truncated: bool,
+    /// Результат нужен модели, но не должен попадать в persistent session history.
+    pub ephemeral: bool,
 }
 
 impl ToolResult {
@@ -93,6 +102,7 @@ impl ToolResult {
             content: content.into(),
             structured: None,
             truncated: false,
+            ephemeral: false,
         }
     }
 
@@ -102,6 +112,7 @@ impl ToolResult {
             content: error.into(),
             structured: None,
             truncated: false,
+            ephemeral: false,
         }
     }
 }
@@ -218,6 +229,7 @@ impl Tool for ReadFile {
             content: result,
             structured: None,
             truncated,
+            ephemeral: false,
         })
     }
 }
@@ -259,6 +271,7 @@ impl Tool for ListDirectory {
             content: result,
             structured: None,
             truncated,
+            ephemeral: false,
         })
     }
 }
@@ -375,6 +388,7 @@ impl Tool for SearchFiles {
                                 content: result,
                                 structured: None,
                                 truncated: true,
+                                ephemeral: false,
                             });
                         }
                     }
@@ -386,6 +400,7 @@ impl Tool for SearchFiles {
             content: result,
             structured: None,
             truncated: false,
+            ephemeral: false,
         })
     }
 }
@@ -528,6 +543,7 @@ impl Tool for RunCommand {
             content,
             structured: None,
             truncated,
+            ephemeral: false,
         })
     }
 }
@@ -540,6 +556,9 @@ pub fn default_registry() -> Result<ToolRegistry, AppError> {
     registry.register(SearchFiles)?;
     registry.register(ReadLines)?;
     registry.register(ProjectSearch)?;
+    registry.register(crate::connectors::tools::ListRecentEmails)?;
+    registry.register(crate::connectors::tools::GetEmail)?;
+    registry.register(crate::connectors::tools::SearchEmails)?;
     Ok(registry)
 }
 
@@ -554,6 +573,11 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
             "search_files" => registry.register(SearchFiles)?,
             "read_lines" => registry.register(ReadLines)?,
             "project_search" => registry.register(ProjectSearch)?,
+            "list_recent_emails" => {
+                registry.register(crate::connectors::tools::ListRecentEmails)?
+            }
+            "get_email" => registry.register(crate::connectors::tools::GetEmail)?,
+            "search_emails" => registry.register(crate::connectors::tools::SearchEmails)?,
             "run_command" => registry.register(RunCommand)?,
             unknown => return Err(AppError::UnknownTool(unknown.to_owned())),
         }

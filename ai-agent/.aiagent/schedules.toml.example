@@ -1,0 +1,6 @@
+[[jobs]]
+name = "morning-email-recap"
+# cron crate uses seven fields: sec min hour day month weekday year.
+cron = "0 0 9 * * * *"
+prompt = "Подготовь recap новых писем за последние 24 часа: темы, отправители, задачи и дедлайны. Не отправляй письма."
+enabled = true

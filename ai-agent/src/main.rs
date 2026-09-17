@@ -14,6 +14,7 @@ use ai_agent::{
     tools::{ToolContext, registry_from_names},
 };
 use clap::Parser;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
@@ -25,6 +26,31 @@ async fn main() {
             return;
         }
     };
+
+    if cli.graph_login {
+        match ai_agent::connectors::auth::GraphAuth::from_env(Duration::from_secs(
+            config.request_timeout_secs,
+        )) {
+            Ok(auth) => match auth.login().await {
+                Ok(()) => println!("Microsoft Graph авторизация завершена."),
+                Err(error) => eprintln!("Ошибка Microsoft Graph login: {error}"),
+            },
+            Err(error) => eprintln!("Ошибка Microsoft Graph login: {error}"),
+        }
+        return;
+    }
+    if cli.gmail_login {
+        match ai_agent::connectors::gmail_auth::GmailAuth::from_env(Duration::from_secs(
+            config.request_timeout_secs,
+        )) {
+            Ok(auth) => match auth.login().await {
+                Ok(()) => println!("Gmail авторизация завершена."),
+                Err(error) => eprintln!("Ошибка Gmail login: {error}"),
+            },
+            Err(error) => eprintln!("Ошибка Gmail login: {error}"),
+        }
+        return;
+    }
 
     let mut session = match Session::new(&config.working_dir, &config.model) {
         Ok(session) => session,
@@ -57,6 +83,31 @@ async fn main() {
         return;
     }
 
+    if cli.scheduler {
+        let path = if cli.schedule_file.is_absolute() {
+            cli.schedule_file.clone()
+        } else {
+            config.working_dir.join(&cli.schedule_file)
+        };
+        let schedule = match ai_agent::scheduler::ScheduleFile::load(&path) {
+            Ok(schedule) => schedule,
+            Err(error) => {
+                eprintln!("Ошибка расписаний: {error}");
+                return;
+            }
+        };
+        run_scheduler(
+            &mut session,
+            provider,
+            &config,
+            &active_profile,
+            &catalog,
+            schedule,
+        )
+        .await;
+        return;
+    }
+
     if let Some(prompt) = cli.prompt {
         run_once(
             &mut session,
@@ -69,6 +120,46 @@ async fn main() {
         .await;
     } else {
         run_repl(&mut session, provider, &config, catalog, active_profile).await;
+    }
+}
+
+async fn run_scheduler(
+    session: &mut Session,
+    provider: ConfiguredProvider,
+    config: &Config,
+    profile: &AgentProfile,
+    catalog: &AgentCatalog,
+    schedule: ai_agent::scheduler::ScheduleFile,
+) {
+    if schedule.jobs.iter().all(|job| !job.enabled) {
+        eprintln!("В расписании нет включённых задач.");
+        return;
+    }
+    loop {
+        let job = match ai_agent::scheduler::wait_for_next(&schedule).await {
+            Ok(Some(job)) => job,
+            Ok(None) => return,
+            Err(error) => {
+                eprintln!("Ошибка scheduler: {error}");
+                return;
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("Остановка scheduler по Ctrl-C.");
+                return;
+            }
+            _ = request_completion(
+                session,
+                provider.clone(),
+                config,
+                profile,
+                catalog,
+                &job.prompt,
+                false,
+                true,
+            ) => {}
+        }
     }
 }
 
@@ -333,6 +424,9 @@ async fn request_completion(
     context.confirm_writes = profile.confirm_writes;
     context.command_allowlist = profile.command_allowlist.clone();
     context.interactive = true;
+    context.graph_base_url = std::env::var("MICROSOFT_GRAPH_BASE_URL").ok();
+    context.graph_access_token = std::env::var("MICROSOFT_GRAPH_ACCESS_TOKEN").ok();
+    context.gmail_client_id = std::env::var("GOOGLE_GMAIL_CLIENT_ID").ok();
     let system_prompt = match catalog.system_prompt(profile) {
         Ok(prompt) => prompt,
         Err(error) => {

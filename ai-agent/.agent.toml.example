@@ -6,7 +6,16 @@ max_tool_rounds = 20
 allow_write = false
 
 # Оставьте только tools, которыми агент действительно должен пользоваться.
-enabled_tools = ["read_file", "list_directory", "search_files", "read_lines", "project_search"]
+enabled_tools = [
+    "read_file",
+    "list_directory",
+    "search_files",
+    "read_lines",
+    "project_search",
+    "list_recent_emails",
+    "get_email",
+    "search_emails",
+]
 
 # Команды должны быть перечислены явно; по умолчанию run_command недоступен.
 command_allowlist = []

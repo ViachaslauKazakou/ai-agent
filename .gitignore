@@ -1,1 +1,7 @@
 /ai-agent/target/
+.env
+.agent/
+.agent-session.json
+.DS_Store
+target/
+client_secret_*.apps.googleusercontent.com.json
