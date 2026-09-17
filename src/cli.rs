@@ -101,6 +101,7 @@ pub enum ReplCommand {
     Model(Option<String>),
     /// Включить, выключить или показать статистику ответа.
     Stats(Option<String>),
+    Compact,
     /// Добавить обычный пользовательский prompt.
     Prompt(String),
     /// Пустая строка.
@@ -145,6 +146,7 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
         "/skill" => ReplCommand::Unknown(input.to_owned()),
         "/model" => ReplCommand::Model((!argument.is_empty()).then(|| argument.to_owned())),
         "/stats" => ReplCommand::Stats((!argument.is_empty()).then(|| argument.to_owned())),
+        "/compact" => ReplCommand::Compact,
         _ => ReplCommand::Unknown(command.to_owned()),
     }
 }
