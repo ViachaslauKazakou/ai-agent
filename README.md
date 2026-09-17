@@ -23,6 +23,8 @@
 - подтверждение записи в интерактивном режиме через `confirm_writes`;
 - `run_command` работает только для команд из `command_allowlist`;
 - ограничение agent loop через `max_tool_rounds`;
+- coding-agent workflow с планом, малыми patch, проверками и итоговым summary;
+- лимиты loop по времени (`max_loop_seconds`) и размеру diff (`max_diff_bytes`);
 - переключение tools во время REPL командами `/tools on` и `/tools off`;
 - project-local агенты в `.aiagent/agents/*.toml`;
 - project-local skills в `.aiagent/skills/<name>/SKILL.md`;
@@ -451,6 +453,8 @@ allow_write = false
 enabled_tools = ["read_file", "list_directory", "search_files", "read_lines", "project_search"]
 command_allowlist = []
 confirm_writes = true
+max_loop_seconds = 600
+max_diff_bytes = 100000
 ```
 
 `allow_write = true` разрешает `write_file`, но tool всё равно должен быть в

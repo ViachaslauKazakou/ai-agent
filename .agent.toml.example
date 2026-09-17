@@ -22,3 +22,7 @@ command_allowlist = []
 
 # Запрашивать подтверждение перед записью в интерактивном REPL.
 confirm_writes = true
+
+# Лимиты coding-agent loop.
+max_loop_seconds = 600
+max_diff_bytes = 100000

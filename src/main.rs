@@ -2,7 +2,7 @@
 
 use std::{
     io::{self, BufRead, Write},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use ai_agent::cli::{Cli, ReplCommand, help_text, parse_repl_command};
@@ -14,7 +14,6 @@ use ai_agent::{
     tools::{ToolContext, registry_from_names},
 };
 use clap::Parser;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
@@ -436,6 +435,10 @@ async fn request_completion(
     };
     let mut agent = Agent::new(provider, registry, context, profile.max_tool_rounds)
         .with_system_prompt(system_prompt)
+        .with_loop_limits(
+            Some(Duration::from_secs(config.max_loop_seconds)),
+            config.max_diff_bytes,
+        )
         .with_tools_enabled(tools_enabled);
     let started = Instant::now();
     println!("\n\x1b[2m┌─ Вы запрашиваете\x1b[0m");
