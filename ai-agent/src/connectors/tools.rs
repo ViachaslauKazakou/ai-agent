@@ -25,7 +25,11 @@ fn client(context: &ToolContext) -> Result<GraphMailClient, AppError> {
     }
 }
 fn source(context: &ToolContext) -> Result<Box<dyn MessageSource>, AppError> {
-    if context.gmail_client_id.is_some() {
+    if context
+        .gmail_client_id
+        .as_deref()
+        .is_some_and(|client_id| !client_id.trim().is_empty())
+    {
         let auth = GmailAuth::from_env(std::time::Duration::from_secs(30))?;
         return Ok(Box::new(GmailMailClient::new(
             auth,
