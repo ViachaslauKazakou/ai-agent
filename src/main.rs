@@ -380,6 +380,22 @@ async fn run_repl(
                     }
                 ),
             },
+            ReplCommand::Compact => {
+                let messages = session
+                    .messages()
+                    .iter()
+                    .map(|message| message.content().to_owned())
+                    .collect::<Vec<_>>();
+                let summary = ai_agent::memory::ProjectMemory::compact_text(&messages, 12_000);
+                session.clear_messages();
+                if let Ok(message) = ai_agent::Message::new(
+                    ai_agent::Role::System,
+                    format!("Session compact summary:\n{summary}"),
+                ) {
+                    session.add_message(message);
+                }
+                println!("История сжата в summary.");
+            }
             ReplCommand::Prompt(prompt) => {
                 request_completion(
                     session,
@@ -432,6 +448,12 @@ async fn request_completion(
             eprintln!("Ошибка skills: {error}");
             return;
         }
+    };
+    let project_instructions = ai_agent::memory::ProjectMemory::instructions(&config.working_dir);
+    let system_prompt = if project_instructions.is_empty() {
+        system_prompt
+    } else {
+        format!("{system_prompt}\n\nTrusted project instructions:\n{project_instructions}")
     };
     let mut agent = Agent::new(provider, registry, context, profile.max_tool_rounds)
         .with_system_prompt(system_prompt)

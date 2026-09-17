@@ -29,6 +29,10 @@
 - project-local агенты в `.aiagent/agents/*.toml`;
 - project-local skills в `.aiagent/skills/<name>/SKILL.md`;
 - инкрементальный JSON-индекс проекта в `.agent/index.json`;
+- P1 project intelligence tools: `project_symbols`, `project_definition`, `project_diagnostics`;
+- P1 `security_review` для типовых security и quality findings;
+- отдельная project memory в `.agent/project-memory.json`, иерархические `AGENTS.md` и `/compact`;
+- provider-neutral CI MVP: `ci_status` и `ci_failure_analysis` для GitHub Actions/GitLab CI/Jenkins;
 - unit-, integration- и HTTP-клиентские тесты.
 
 ## Работа с почтой
@@ -399,6 +403,12 @@ ai-agent
 | `git_commit` | commit с подтверждением |
 | `git_push` | push с подтверждением |
 | `git_create_pr` | GitHub PR через `gh` с подтверждением |
+| `project_symbols` | поиск символов и определений |
+| `project_definition` | поиск references через Git |
+| `project_diagnostics` | read-only compiler/checker diagnostics |
+| `security_review` | security и quality scanning |
+| `ci_status` | обнаружение CI-конфигураций |
+| `ci_failure_analysis` | анализ bounded CI-логов |
 | `search_files` | поиск текста по файлам |
 | `read_lines` | чтение диапазона строк |
 | `project_search` | поиск по локальному индексу |
@@ -541,6 +551,39 @@ cargo fmt -- --check \
 ```
 
 ## Текущие ограничения
+
+## Выполненные P1 задачи
+
+### Project intelligence и LSP
+
+Реализовано в PR с сабтаском [#18](https://github.com/ViachaslauKazakou/ai-agent/issues/18):
+
+- поиск символов, определений и references в исходниках;
+- read-only diagnostics для Rust, TypeScript/JavaScript и Python;
+- базовая маршрутизация языков с безопасными лимитами проекта.
+
+### Security review и качество
+
+Реализовано в PR с сабтаском [#19](https://github.com/ViachaslauKazakou/ai-agent/issues/19):
+
+- findings с severity и координатами для секретов, shell command construction, SQL-конкатенации, unsafe patterns и TODO/FIXME;
+- read-only режим security review без автоматического изменения файлов.
+
+### Память и управление контекстом
+
+Реализовано в PR с сабтаском [#20](https://github.com/ViachaslauKazakou/ai-agent/issues/20):
+
+- отдельная модель project memory с summary, preferences и decisions;
+- атомарное хранение в `.agent/project-memory.json`;
+- иерархические `AGENTS.md` и команда `/compact` для сжатия session history.
+
+### GitHub/GitLab и CI/CD
+
+Реализовано в PR с сабтаском [#21](https://github.com/ViachaslauKazakou/ai-agent/issues/21):
+
+- обнаружение GitHub Actions, GitLab CI и Jenkinsfile;
+- `ci_status` и bounded `ci_failure_analysis` в read-only режиме;
+- provider-neutral основа без автоматического rerun job или публикации уведомлений.
 
 - автоматический fallback/retry без tools после HTTP 400 пока не реализован;
 - tools выключаются вручную через `/tools off`;

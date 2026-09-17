@@ -1108,6 +1108,9 @@ pub fn default_registry() -> Result<ToolRegistry, AppError> {
     registry.register(ReadFile)?;
     registry.register(ListDirectory)?;
     registry.register(WriteFile)?;
+    crate::project_intelligence::register(&mut registry)?;
+    crate::security_review::register(&mut registry)?;
+    crate::ci::register(&mut registry)?;
     registry.register(ApplyPatch)?;
     registry.register(RollbackLastChange)?;
     registry.register(GitStatus)?;
@@ -1135,6 +1138,16 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
             "read_file" => registry.register(ReadFile)?,
             "list_directory" => registry.register(ListDirectory)?,
             "write_file" => registry.register(WriteFile)?,
+            "project_symbols" => registry.register(crate::project_intelligence::SymbolIndex)?,
+            "project_diagnostics" => {
+                registry.register(crate::project_intelligence::ProjectDiagnostics)?
+            }
+            "project_definition" => {
+                registry.register(crate::project_intelligence::ProjectDefinitions)?
+            }
+            "security_review" => registry.register(crate::security_review::SecurityReview)?,
+            "ci_status" => registry.register(crate::ci::CiStatus)?,
+            "ci_failure_analysis" => registry.register(crate::ci::CiFailureAnalysis)?,
             "apply_patch" => registry.register(ApplyPatch)?,
             "rollback_last_change" => registry.register(RollbackLastChange)?,
             "git_status" => registry.register(GitStatus)?,
