@@ -77,6 +77,12 @@ pub enum AppError {
     #[error("Достигнут лимит раундов инструментов: {0}")]
     ToolRoundLimit(usize),
 
+    #[error("Превышен лимит времени coding loop: {0} секунд")]
+    CodingLoopTimeout(u64),
+
+    #[error("Превышен лимит размера diff: {actual} байт (максимум {limit})")]
+    DiffSizeLimit { actual: usize, limit: usize },
+
     /// Конфигурационный файл агента не удалось прочитать или разобрать.
     #[error("Ошибка конфигурационного файла: {0}")]
     AgentConfig(String),

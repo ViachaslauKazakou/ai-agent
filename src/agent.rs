@@ -1,6 +1,7 @@
 //! Agent loop: модель → tools → результаты → модель.
 
 use serde_json::Value;
+use std::time::{Duration, Instant};
 
 use crate::tools::{ToolContext, ToolRegistry};
 use crate::{AppError, CompletionRequest, LlmMessage, LlmProvider, Message, Role, Session, Usage};
@@ -11,6 +12,15 @@ pub struct AgentResponse {
     pub content: String,
     pub tool_rounds: usize,
     pub usage: Option<Usage>,
+    pub summary: LoopSummary,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LoopSummary {
+    pub tool_calls: usize,
+    pub changed_files: Vec<String>,
+    pub checks: Vec<String>,
+    pub remaining_issues: Vec<String>,
 }
 
 /// Координатор LLM и зарегистрированных инструментов.
@@ -22,6 +32,9 @@ pub struct Agent<P> {
     messages: Vec<LlmMessage>,
     system_prompt: Option<String>,
     tools_enabled: bool,
+    max_elapsed: Option<Duration>,
+    max_diff_bytes: usize,
+    workflow_prompt: bool,
 }
 
 impl<P: LlmProvider> Agent<P> {
@@ -39,6 +52,9 @@ impl<P: LlmProvider> Agent<P> {
             messages: Vec::new(),
             system_prompt: None,
             tools_enabled: true,
+            max_elapsed: None,
+            max_diff_bytes: 100_000,
+            workflow_prompt: true,
         }
     }
 
@@ -53,11 +69,27 @@ impl<P: LlmProvider> Agent<P> {
         self
     }
 
+    pub fn with_loop_limits(
+        mut self,
+        max_elapsed: Option<Duration>,
+        max_diff_bytes: usize,
+    ) -> Self {
+        self.max_elapsed = max_elapsed;
+        self.max_diff_bytes = max_diff_bytes;
+        self
+    }
+
+    pub fn with_workflow_prompt(mut self, enabled: bool) -> Self {
+        self.workflow_prompt = enabled;
+        self
+    }
+
     pub async fn complete(
         &mut self,
         session: &mut Session,
         prompt: &str,
     ) -> Result<AgentResponse, AppError> {
+        let started = Instant::now();
         if self.messages.is_empty() {
             self.messages = session
                 .messages()
@@ -65,11 +97,18 @@ impl<P: LlmProvider> Agent<P> {
                 .map(LlmMessage::from_message)
                 .collect();
             if let Some(prompt) = &self.system_prompt {
+                let prompt = if self.workflow_prompt {
+                    format!(
+                        "{prompt}\n\nCoding workflow: analyze -> state a short plan -> apply small patches -> review diff -> run relevant tests/checkers -> fix failures -> report changed files, checks, and remaining issues. Stop and ask for clarification before ambiguous or dangerous actions."
+                    )
+                } else {
+                    prompt.clone()
+                };
                 self.messages.insert(
                     0,
                     LlmMessage {
                         role: "system".to_owned(),
-                        content: Some(prompt.clone()),
+                        content: Some(prompt),
                         tool_calls: None,
                         tool_call_id: None,
                     },
@@ -86,7 +125,13 @@ impl<P: LlmProvider> Agent<P> {
             total_tokens: Some(0),
         };
         let mut has_usage = false;
+        let mut summary = LoopSummary::default();
         for round in 0..self.max_tool_rounds {
+            if let Some(limit) = self.max_elapsed
+                && started.elapsed() > limit
+            {
+                return Err(AppError::CodingLoopTimeout(limit.as_secs()));
+            }
             let request = CompletionRequest::from_llm_messages(
                 session.model(),
                 self.messages.clone(),
@@ -115,6 +160,7 @@ impl<P: LlmProvider> Agent<P> {
                     content,
                     tool_rounds: round,
                     usage: has_usage.then_some(usage),
+                    summary,
                 });
             };
 
@@ -123,6 +169,14 @@ impl<P: LlmProvider> Agent<P> {
             }
 
             for call in tool_calls {
+                summary.tool_calls += 1;
+                if matches!(call.function.name.as_str(), "write_file" | "apply_patch")
+                    && let Ok(arguments) = serde_json::from_str::<Value>(&call.function.arguments)
+                    && let Some(path) = arguments.get("path").and_then(Value::as_str)
+                    && !summary.changed_files.iter().any(|item| item == path)
+                {
+                    summary.changed_files.push(path.to_owned());
+                }
                 let args: Value = match serde_json::from_str(&call.function.arguments) {
                     Ok(args) => args,
                     Err(error) => {
@@ -136,8 +190,27 @@ impl<P: LlmProvider> Agent<P> {
                     .execute(&call.function.name, args, &self.context)
                     .await;
                 let (content, persist) = match result {
-                    Ok(result) => (result.content, !result.ephemeral),
-                    Err(error) => (error.to_string(), true),
+                    Ok(result) => {
+                        if result.content.contains("diff") {
+                            let size = result.content.len();
+                            if size > self.max_diff_bytes {
+                                return Err(AppError::DiffSizeLimit {
+                                    actual: size,
+                                    limit: self.max_diff_bytes,
+                                });
+                            }
+                        }
+                        if call.function.name.contains("test")
+                            || call.function.name.contains("command")
+                        {
+                            summary.checks.push(call.function.name.clone());
+                        }
+                        (result.content, !result.ephemeral)
+                    }
+                    Err(error) => {
+                        summary.remaining_issues.push(error.to_string());
+                        (error.to_string(), true)
+                    }
                 };
                 self.push_tool_result(session, &call.id, content, persist);
             }

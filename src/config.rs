@@ -31,6 +31,8 @@ struct AgentFileConfig {
     enabled_tools: Option<Vec<String>>,
     command_allowlist: Option<Vec<String>>,
     confirm_writes: Option<bool>,
+    max_loop_seconds: Option<u64>,
+    max_diff_bytes: Option<usize>,
 }
 
 /// Итоговая конфигурация после объединения defaults, окружения и CLI.
@@ -60,6 +62,8 @@ pub struct Config {
     pub enabled_tools: Vec<String>,
     pub command_allowlist: Vec<String>,
     pub confirm_writes: bool,
+    pub max_loop_seconds: u64,
+    pub max_diff_bytes: usize,
 }
 
 impl fmt::Debug for Config {
@@ -101,6 +105,8 @@ impl Config {
             "enabled_tools": self.enabled_tools,
             "command_allowlist": self.command_allowlist,
             "confirm_writes": self.confirm_writes,
+            "max_loop_seconds": self.max_loop_seconds,
+            "max_diff_bytes": self.max_diff_bytes,
         });
 
         serde_json::to_string_pretty(&value).expect("configuration JSON should be serializable")
@@ -250,6 +256,13 @@ impl Config {
         });
         let command_allowlist = file_agent.command_allowlist.unwrap_or_default();
         let confirm_writes = file_agent.confirm_writes.unwrap_or(false);
+        let max_loop_seconds = file_agent.max_loop_seconds.unwrap_or(600);
+        let max_diff_bytes = file_agent.max_diff_bytes.unwrap_or(100_000);
+        if max_loop_seconds == 0 || max_diff_bytes == 0 {
+            return Err(AppError::InvalidConfig(
+                "лимиты coding loop должны быть больше нуля".to_owned(),
+            ));
+        }
         validate_tools(&enabled_tools, allow_write)?;
 
         Ok(Self {
@@ -266,6 +279,8 @@ impl Config {
             enabled_tools,
             command_allowlist,
             confirm_writes,
+            max_loop_seconds,
+            max_diff_bytes,
         })
     }
 }
@@ -504,6 +519,8 @@ mod tests {
                     enabled_tools: Some(vec!["read_file".to_owned()]),
                     command_allowlist: None,
                     confirm_writes: None,
+                    max_loop_seconds: None,
+                    max_diff_bytes: None,
                 }),
             },
         );
@@ -523,6 +540,8 @@ mod tests {
                     enabled_tools: Some(vec!["shell".to_owned()]),
                     command_allowlist: None,
                     confirm_writes: None,
+                    max_loop_seconds: None,
+                    max_diff_bytes: None,
                 }),
             },
         );
