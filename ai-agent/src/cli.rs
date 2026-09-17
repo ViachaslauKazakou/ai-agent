@@ -50,6 +50,18 @@ pub struct Cli {
 
     /// Одноразовый prompt. Если не указан, запускается REPL.
     pub prompt: Option<String>,
+
+    /// Запустить встроенный кроссплатформенный runner расписаний.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub scheduler: bool,
+
+    /// TOML-файл расписаний для `--scheduler`.
+    #[arg(long, default_value = ".aiagent/schedules.toml", value_name = "PATH")]
+    pub schedule_file: PathBuf,
+
+    /// Выполнить Microsoft device-code login и сохранить refresh token в OS keychain.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub graph_login: bool,
 }
 
 /// Команда, распознанная внутри REPL.
@@ -166,6 +178,9 @@ mod tests {
                 allow_write: false,
                 verbose: Some(true),
                 prompt: Some("Изучи проект".to_owned()),
+                scheduler: false,
+                schedule_file: PathBuf::from(".aiagent/schedules.toml"),
+                graph_login: false,
             }
         );
     }

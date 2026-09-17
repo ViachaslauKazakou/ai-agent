@@ -8,10 +8,12 @@ pub mod agent;
 pub mod agents;
 pub mod cli;
 pub mod config;
+pub mod connectors;
 pub mod domain;
 pub mod error;
 pub mod index;
 pub mod llm;
+pub mod scheduler;
 pub mod tools;
 pub mod word_processing;
 

@@ -23,6 +23,30 @@
 - инкрементальный JSON-индекс проекта в `.agent/index.json`;
 - unit-, integration- и HTTP-клиентские тесты.
 
+### Outlook / Microsoft Graph
+
+Для read-only email tools создайте public client app registration в Microsoft Entra,
+задайте `MICROSOFT_GRAPH_CLIENT_ID` и выполните:
+
+```bash
+cargo run -- --graph-login
+```
+
+Device-code flow выводит URL и код в терминал. Refresh token сохраняется только в
+системном credential store (macOS Keychain, Windows Credential Manager или Linux
+Secret Service); в `.env`, `.agent-session.json` и логах он не записывается.
+Для CI/mock HTTP допускается временный `MICROSOFT_GRAPH_ACCESS_TOKEN`.
+
+`get_email` и email search results передаются текущему LLM, но помечены ephemeral и
+не сохраняются в persistent session history. Scheduler запускается так:
+
+```bash
+cargo run -- --scheduler --schedule-file .aiagent/schedules.toml
+```
+
+Остановка через Ctrl-C выполняется корректно между job; job выполняются строго
+последовательно.
+
 > Для моделей, которые не поддерживают tool definitions, перед prompt используйте
 > `/tools off`. Автоматический retry после HTTP 400 пока не реализован.
 

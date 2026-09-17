@@ -281,6 +281,9 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
                 | "read_lines"
                 | "project_search"
                 | "run_command"
+                | "list_recent_emails"
+                | "get_email"
+                | "search_emails"
         ) {
             return Err(AppError::UnknownTool(tool.clone()));
         }
