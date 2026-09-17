@@ -18,6 +18,8 @@
 - diff-based редактирование через `apply_patch` с preview и подтверждением;
 - checkpoint перед записью и `rollback_last_change` для отката;
 - запрет `.env`, credential/secret-файлов и секретов в содержимом;
+- Git workflow tools: status, diff, log, branch, commit, push и GitHub PR;
+- commit, push и PR требуют явного интерактивного подтверждения;
 - подтверждение записи в интерактивном режиме через `confirm_writes`;
 - `run_command` работает только для команд из `command_allowlist`;
 - ограничение agent loop через `max_tool_rounds`;
@@ -387,6 +389,14 @@ ai-agent
 | `write_file` | запись файла внутри `working_dir` |
 | `apply_patch` | preview и безопасное применение точечного patch |
 | `rollback_last_change` | откат последнего checkpoint |
+| `git_status` | статус Git-репозитория |
+| `git_diff` | diff (staged или unstaged) |
+| `git_log` | последние коммиты |
+| `git_create_branch` | создание ветки с подтверждением |
+| `git_prepare_commit` | подготовка staged diff и secret scan |
+| `git_commit` | commit с подтверждением |
+| `git_push` | push с подтверждением |
+| `git_create_pr` | GitHub PR через `gh` с подтверждением |
 | `search_files` | поиск текста по файлам |
 | `read_lines` | чтение диапазона строк |
 | `project_search` | поиск по локальному индексу |
