@@ -183,7 +183,7 @@ fn count_items<T>(items: &[T]) -> usize
 Выполнять из каталога:
 
 ```bash
-cd /Users/Viachaslau_Kazakou/Work/ai-agent/ai-agent
+cd /Users/Viachaslau_Kazakou/Work/ai-agent
 ```
 
 Проверить форматирование:

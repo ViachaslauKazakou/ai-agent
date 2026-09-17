@@ -1,4 +1,3 @@
-/ai-agent/target/
 .env
 .agent/
 .agent-session.json

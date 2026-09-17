@@ -70,7 +70,7 @@ LLM-провайдера.
 Все команды нужно выполнять из каталога проекта:
 
 ```bash
-cd /Users/Viachaslau_Kazakou/Work/ai-agent/ai-agent
+cd /Users/Viachaslau_Kazakou/Work/ai-agent
 ```
 
 ### Форматирование

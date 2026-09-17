@@ -1,0 +1,229 @@
+name: 🚀 Auto Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Type of release
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  CARGO_TERM_COLOR: always
+  MANIFEST_PATH: Cargo.toml
+
+jobs:
+  auto-release:
+    name: 🏷️ Create Auto Release
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'push' &&
+        github.event.head_commit != null &&
+        !contains(github.event.head_commit.message, '[skip-ci]')
+      )
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: 🦀 Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.89.0
+          components: rustfmt
+
+      - name: 🏷️ Fetch all tags
+        run: |
+          git fetch --tags --force
+          echo "📋 Existing tags:"
+          git tag -l | sort -V
+
+      - name: 📖 Get current version
+        id: current_version
+        run: |
+          CURRENT_VERSION=$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' "$MANIFEST_PATH" | head -n 1)
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "Could not read package version from $MANIFEST_PATH" >&2
+            exit 1
+          fi
+          echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "📦 Current version: $CURRENT_VERSION"
+
+      - name: 🎯 Determine release type
+        id: release_type
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE_TYPE="${{ inputs.release_type }}"
+          else
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+            if [ -n "$LAST_TAG" ]; then
+              COMMIT_RANGE="$LAST_TAG..HEAD"
+            else
+              COMMIT_RANGE="HEAD"
+            fi
+
+            if git log --format=%s "$COMMIT_RANGE" | grep -qiE '(^|[^a-z])(breaking|major):'; then
+              RELEASE_TYPE="major"
+            elif git log --format=%s "$COMMIT_RANGE" | grep -qiE '(^|[^a-z])(feat|feature):'; then
+              RELEASE_TYPE="minor"
+            else
+              RELEASE_TYPE="patch"
+            fi
+          fi
+
+          echo "type=$RELEASE_TYPE" >> "$GITHUB_OUTPUT"
+          echo "🎯 Release type: $RELEASE_TYPE"
+
+      - name: 🧮 Calculate new version
+        id: new_version
+        env:
+          CURRENT_VERSION: ${{ steps.current_version.outputs.version }}
+          RELEASE_TYPE: ${{ steps.release_type.outputs.type }}
+        run: |
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          case "$RELEASE_TYPE" in
+            major)
+              MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1)); PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+            *)
+              echo "Unsupported release type: $RELEASE_TYPE" >&2
+              exit 1
+              ;;
+          esac
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          while git show-ref --tags --verify --quiet "refs/tags/v$NEW_VERSION"; do
+            PATCH=$((PATCH + 1))
+            NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          done
+
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "🚀 New version: $NEW_VERSION"
+
+      - name: ✏️ Update Cargo version
+        env:
+          NEW_VERSION: ${{ steps.new_version.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          manifest = Path(os.environ["MANIFEST_PATH"])
+          new_version = os.environ["NEW_VERSION"]
+          content = manifest.read_text()
+          updated, replacements = re.subn(
+              r'(?m)^(version = ")[0-9][0-9.]+("$)',
+              rf'\g<1>{new_version}\g<2>',
+              content,
+              count=1,
+          )
+          if replacements != 1:
+              raise SystemExit(f"Expected one package version in {manifest}")
+          manifest.write_text(updated)
+          PY
+          cargo check --manifest-path "$MANIFEST_PATH"
+
+      - name: ✅ Validate and build
+        run: |
+          cargo fmt --all -- --check
+          cargo test --all-targets
+          cargo build --release --locked
+
+      - name: 📝 Update Cargo.lock and commit version
+        env:
+          NEW_VERSION: ${{ steps.new_version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release v$NEW_VERSION [skip-ci]"
+          git push origin HEAD:main
+
+      - name: 📦 Package Linux binary
+        env:
+          NEW_VERSION: ${{ steps.new_version.outputs.version }}
+        run: |
+          ARCHIVE="ai-agent-v${NEW_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          tar -C target/release -czf "$ARCHIVE" ai-agent
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+        id: package
+
+      - name: 📝 Generate changelog
+        id: changelog
+        env:
+          CURRENT_VERSION: ${{ steps.current_version.outputs.version }}
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$LAST_TAG" ]; then
+            COMMIT_RANGE="$LAST_TAG..HEAD"
+          else
+            COMMIT_RANGE="HEAD"
+          fi
+          {
+            echo "## Changes"
+            echo
+            git log --format='- %s (%h)' "$COMMIT_RANGE"
+          } > CHANGELOG.md
+          {
+            echo 'body<<EOF'
+            cat CHANGELOG.md
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 🎉 Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.new_version.outputs.version }}
+          name: 🚀 Release v${{ steps.new_version.outputs.version }}
+          body: |
+            # 🚀 AI Agent v${{ steps.new_version.outputs.version }}
+
+            **Release type:** `${{ steps.release_type.outputs.type }}`
+            **Previous version:** `v${{ steps.current_version.outputs.version }}`
+
+            ${{ steps.changelog.outputs.body }}
+
+            ## Installation
+
+            Download the `ai-agent-v${{ steps.new_version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz` asset for Linux x86_64.
+          files: ${{ steps.package.outputs.archive }}
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📊 Summary
+        run: |
+          {
+            echo "## 🎉 Release Summary"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Previous version | \`v${{ steps.current_version.outputs.version }}\` |"
+            echo "| New version | \`v${{ steps.new_version.outputs.version }}\` |"
+            echo "| Release type | \`${{ steps.release_type.outputs.type }}\` |"
+            echo "| Artifact | \`${{ steps.package.outputs.archive }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

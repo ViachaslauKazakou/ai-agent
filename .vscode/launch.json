@@ -1,18 +1,17 @@
 {
     // Конфигурация предназначена для расширения CodeLLDB.
-    // Cargo-проект находится не в корне workspace, а во вложенной директории
-    // ${workspaceFolder}/ai-agent.
+    // Cargo-проект находится в корне workspace.
     "version": "0.2.0",
     "configurations": [
         {
             "name": "Debug ai-agent",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/ai-agent/target/debug/ai-agent",
+            "program": "${workspaceFolder}/target/debug/ai-agent",
             "args": [
                 "${input:agentArgs}"
             ],
-            "cwd": "${workspaceFolder}/ai-agent",
+            "cwd": "${workspaceFolder}",
             "sourceLanguages": [
                 "rust"
             ],
@@ -23,7 +22,7 @@
                 "args": [
                     "build",
                     "--manifest-path",
-                    "${workspaceFolder}/ai-agent/Cargo.toml",
+                    "${workspaceFolder}/Cargo.toml",
                     "--bin",
                     "ai-agent"
                 ]

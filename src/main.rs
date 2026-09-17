@@ -457,7 +457,10 @@ async fn request_completion(
 
 fn print_banner(provider: &str, model: &str, show_stats: bool) {
     println!("\n\x1b[1;35m╭────────────────────────────────────────╮\x1b[0m");
-    println!("\x1b[1;35m│\x1b[0m  \x1b[1mAI Agent\x1b[0m  ·  \x1b[36m{provider}\x1b[0m");
+    println!(
+        "\x1b[1;35m│\x1b[0m  \x1b[1mAI Agent v{}\x1b[0m  ·  \x1b[36m{provider}\x1b[0m",
+        env!("CARGO_PKG_VERSION")
+    );
     println!("\x1b[1;35m│\x1b[0m  Модель: \x1b[1m{model}\x1b[0m");
     println!(
         "\x1b[1;35m│\x1b[0m  Статистика: {}  ·  /help для команд",

@@ -59,7 +59,7 @@ enabled_tools = [
    OAuth consent screen.
 2. Создайте OAuth Client ID типа **Desktop app**.
 3. Скопируйте client ID и, если он указан в JSON credentials, client secret в
-   локальный `ai-agent/.env`:
+   локальный `.env`:
 
    ```env
    GOOGLE_GMAIL_CLIENT_ID=...
@@ -88,7 +88,7 @@ enabled_tools = [
 
 1. В Microsoft Entra создайте App registration с public client/device-code flow.
 2. Добавьте delegated permissions `Mail.Read`, `User.Read` и `offline_access`.
-3. Запишите client ID в локальный `ai-agent/.env`:
+3. Запишите client ID в локальный `.env`:
 
    ```env
    MICROSOFT_GRAPH_CLIENT_ID=...
@@ -196,7 +196,7 @@ cargo --version
 ```
 
 Проект использует Rust edition 2024 и находится в каталоге
-`/Users/Viachaslau_Kazakou/Work/ai-agent/ai-agent`.
+`/Users/Viachaslau_Kazakou/Work/ai-agent`.
 
 ## Сборка и установка
 
@@ -222,7 +222,7 @@ ai-agent
 cd /Users/Viachaslau_Kazakou/Work/ai-agent
 make run
 # или
-cargo run --manifest-path ai-agent/Cargo.toml
+cargo run
 ```
 
 Рабочую директорию можно задать явно:
@@ -397,7 +397,7 @@ ai-agent
 В Rust-проекте скопируйте пример окружения:
 
 ```bash
-cd /Users/Viachaslau_Kazakou/Work/ai-agent/ai-agent
+cd /Users/Viachaslau_Kazakou/Work/ai-agent
 cp .env.example .env
 ```
 
@@ -458,8 +458,8 @@ Project-local настройки хранятся в `.aiagent/`:
 Профиль задаёт модель, provider, system prompt, tools, permissions, лимит
 tool rounds и список skills. Профиль по умолчанию создаётся автоматически.
 Пример профиля находится в
-`ai-agent/.aiagent/agents/reviewer.toml.example`, пример skill — в
-`ai-agent/.aiagent/skills/testing/SKILL.md`.
+`.aiagent/agents/reviewer.toml.example`, пример skill — в
+`.aiagent/skills/testing/SKILL.md`.
 
 Skills являются инструкциями для system prompt: они не добавляют tools и не
 расширяют permissions или `command_allowlist`.
@@ -474,7 +474,7 @@ Skills являются инструкциями для system prompt: они н
 ## Структура
 
 ```text
-ai-agent/
+./
 ├── Cargo.toml
 ├── .env.example
 ├── .agent.toml.example

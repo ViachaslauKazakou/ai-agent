@@ -104,7 +104,7 @@ Unit-тесты остаются внутри модулей под `#[cfg(test)
 
 ## Проверки
 
-Из каталога `/Users/Viachaslau_Kazakou/Work/ai-agent/ai-agent`:
+Из каталога `/Users/Viachaslau_Kazakou/Work/ai-agent`:
 
 ```bash
 cargo fmt -- --check

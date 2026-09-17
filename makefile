@@ -1,5 +1,5 @@
-PROJECT_DIR := ai-agent
-MANIFEST := $(PROJECT_DIR)/Cargo.toml
+PROJECT_DIR := .
+MANIFEST := Cargo.toml
 BINARY := ai-agent
 INSTALL_DIR := $(HOME)/.cargo/bin
 
@@ -43,7 +43,7 @@ release:
 	$(CARGO) build --release --manifest-path $(MANIFEST)
 
 install:
-	$(CARGO) install --path $(PROJECT_DIR) --locked --force
+	$(CARGO) install --path . --locked --force
 
 uninstall:
 	rm -f $(INSTALL_DIR)/$(BINARY)
@@ -52,7 +52,7 @@ run:
 	$(CARGO) run --manifest-path $(MANIFEST) -- $(ARGS)
 
 run-release: release
-	$(PROJECT_DIR)/target/release/$(BINARY) $(ARGS)
+	target/release/$(BINARY) $(ARGS)
 
 run-installed:
 	$(BINARY) $(ARGS)
@@ -67,11 +67,11 @@ run-litellm:
 
 run-ollama-release: release
 	LLM_PROVIDER=ollama OLLAMA_BASE_URL=$(OLLAMA_URL) MODEL=$(OLLAMA_MODEL) \
-		$(PROJECT_DIR)/target/release/$(BINARY) $(ARGS)
+		target/release/$(BINARY) $(ARGS)
 
 run-litellm-release: release
 	LLM_PROVIDER=litellm LITELLM_BASE_URL=$(LITELLM_URL) MODEL=$(LITELLM_MODEL) \
-		$(PROJECT_DIR)/target/release/$(BINARY) $(ARGS)
+		target/release/$(BINARY) $(ARGS)
 
 run-ollama-installed:
 	LLM_PROVIDER=ollama OLLAMA_BASE_URL=$(OLLAMA_URL) MODEL=$(OLLAMA_MODEL) \

@@ -29,7 +29,7 @@ Agent loop: prompt -> LLM -> tool call -> result -> LLM -> answer
 
 ## 2. Текущее состояние проекта
 
-Рабочий каталог проекта: `/Users/Viachaslau_Kazakou/Work/ai-agent/ai-agent`.
+Рабочий каталог проекта: `/Users/Viachaslau_Kazakou/Work/ai-agent`.
 
 Сейчас:
 
@@ -93,7 +93,7 @@ Agent loop: prompt -> LLM -> tool call -> result -> LLM -> answer
 Итоговая структура:
 
 ```text
-/Users/Viachaslau_Kazakou/Work/ai-agent/ai-agent/
+/Users/Viachaslau_Kazakou/Work/ai-agent/
 ├── Cargo.toml
 ├── Cargo.lock
 ├── .env.example
@@ -142,7 +142,7 @@ Agent loop: prompt -> LLM -> tool call -> result -> LLM -> answer
 
 ### Действия
 
-1. Перейти в `/Users/Viachaslau_Kazakou/Work/ai-agent/ai-agent`.
+1. Перейти в `/Users/Viachaslau_Kazakou/Work/ai-agent`.
 2. Проверить исходное состояние:
 
    ```bash
