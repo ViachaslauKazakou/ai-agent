@@ -31,6 +31,47 @@
 - инкрементальный JSON-индекс проекта в `.agent/index.json`;
 - unit-, integration- и HTTP-клиентские тесты.
 
+## Выполненные задачи roadmap
+
+### P0: Безопасное редактирование кода
+
+Реализовано в PR [#12](https://github.com/ViachaslauKazakou/ai-agent/pull/12), сабтаск
+[#11](https://github.com/ViachaslauKazakou/ai-agent/issues/11):
+
+- `apply_patch` сначала показывает diff и требует явного подтверждения перед записью;
+- перед изменением создаётся checkpoint, доступен `rollback_last_change`;
+- редактирование ограничено `working_dir` и Git-репозиторием;
+- защищены `.env`, credential/secret-файлы и содержимое с известными маркерами секретов;
+- `write_file` также проверяет секреты и создаёт checkpoint.
+
+### P0: Git-интеграция
+
+Реализовано в PR [#14](https://github.com/ViachaslauKazakou/ai-agent/pull/14), сабтаск
+[#13](https://github.com/ViachaslauKazakou/ai-agent/issues/13):
+
+- read-only tools для `status`, `diff` и `log`;
+- создание веток, подготовка staged diff и commit message;
+- `commit`, `push` и создание GitHub PR через `gh` только после явного подтверждения;
+- проверка staged diff, Git output и PR metadata на секреты;
+- Git-операции выполняются только внутри репозитория, связанного с `working_dir`.
+
+### P0: Надёжный coding-agent loop
+
+Реализовано в PR [#16](https://github.com/ViachaslauKazakou/ai-agent/pull/16), сабтаск
+[#15](https://github.com/ViachaslauKazakou/ai-agent/issues/15):
+
+- workflow агента закрепляет последовательность «анализ → план → patch → diff review → проверки → исправление → summary»;
+- `LoopSummary` собирает tool calls, изменённые файлы, проверки и оставшиеся проблемы;
+- добавлены лимиты времени loop (`max_loop_seconds`) и размера diff (`max_diff_bytes`);
+- превышение лимитов возвращается как типизированная ошибка.
+
+### Следующая задача
+
+Полноценный GitHub connector описан в issue
+[#17](https://github.com/ViachaslauKazakou/ai-agent/issues/17). Планируется поддержка
+Issues, Pull Requests, reviews, comments, labels, releases и checks через provider
+interface, с read-only режимом по умолчанию и подтверждением всех mutating операций.
+
 ## Работа с почтой
 
 Агент умеет читать почту в режиме read-only. Поддерживаются Gmail и Outlook через

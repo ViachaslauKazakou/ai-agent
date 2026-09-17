@@ -126,7 +126,7 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
 
     match command {
         "/help" => ReplCommand::Help,
-        "/exit" | "/quit" => ReplCommand::Quit,
+        "/exit" | "/quit" | "/q" | "/bye" => ReplCommand::Quit,
         "/clear" => ReplCommand::Clear,
         "/status" => ReplCommand::Status,
         "/tools" => ReplCommand::Tools((!argument.is_empty()).then(|| argument.to_owned())),
