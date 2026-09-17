@@ -50,9 +50,21 @@ cargo run -- --gmail-login
 
 Ссылка откроется в браузере/терминале. Refresh token сохраняется только в
 системном credential store под сервисом `ai-agent.gmail`; пароль Gmail и
-client secret приложению не нужны. Доступ ограничен read-only scope
+client secret не записывается в репозиторий и берётся из
+`GOOGLE_GMAIL_CLIENT_SECRET`, если его требует созданный OAuth client. Доступ ограничен read-only scope
 `gmail.readonly`. Если `GOOGLE_GMAIL_CLIENT_ID` задан, email tools используют
 Gmail; иначе они используют Microsoft Graph.
+
+Если Google возвращает `client_secret is missing`, добавьте secret из JSON-файла
+OAuth client в локальный `.env`:
+
+```env
+GOOGLE_GMAIL_CLIENT_ID=...
+GOOGLE_GMAIL_CLIENT_SECRET=...
+```
+
+Не коммитьте JSON-файл с OAuth credentials. Если secret уже был опубликован,
+отозовите OAuth client в Google Cloud Console и создайте новый.
 
 Gmail поддерживает тот же набор read-only tools: `list_recent_emails`,
 `get_email` и `search_emails`. Параметр `query` передаётся как Gmail search

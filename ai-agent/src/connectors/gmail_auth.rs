@@ -26,6 +26,7 @@ const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 pub struct GmailAuth {
     client: Client,
     client_id: String,
+    client_secret: Option<String>,
     state: Arc<Mutex<TokenState>>,
 }
 
@@ -48,6 +49,9 @@ impl GmailAuth {
     pub fn from_env(timeout: Duration) -> Result<Self, AppError> {
         let client_id = std::env::var("GOOGLE_GMAIL_CLIENT_ID")
             .map_err(|_| AppError::InvalidConfig("GOOGLE_GMAIL_CLIENT_ID не задан".into()))?;
+        let client_secret = std::env::var("GOOGLE_GMAIL_CLIENT_SECRET")
+            .ok()
+            .filter(|secret| !secret.trim().is_empty());
         let client = Client::builder()
             .timeout(timeout)
             .build()
@@ -55,6 +59,7 @@ impl GmailAuth {
         Ok(Self {
             client,
             client_id,
+            client_secret,
             state: Arc::new(Mutex::new(TokenState::default())),
         })
     }
@@ -114,16 +119,20 @@ impl GmailAuth {
                     .unwrap_or_else(|| "authorization code отсутствует".into())
             ))
         })?;
+        let mut form = vec![
+            ("code", code.as_str()),
+            ("client_id", self.client_id.as_str()),
+            ("redirect_uri", REDIRECT_URI),
+            ("grant_type", "authorization_code"),
+            ("code_verifier", verifier.as_str()),
+        ];
+        if let Some(client_secret) = self.client_secret.as_deref() {
+            form.push(("client_secret", client_secret));
+        }
         let token = self
             .client
             .post(TOKEN_ENDPOINT)
-            .form(&[
-                ("code", code.as_str()),
-                ("client_id", self.client_id.as_str()),
-                ("redirect_uri", REDIRECT_URI),
-                ("grant_type", "authorization_code"),
-                ("code_verifier", verifier.as_str()),
-            ])
+            .form(&form)
             .send()
             .await
             .map_err(|e| AppError::Tool(format!("Gmail token network error: {e}")))?;
@@ -178,14 +187,18 @@ impl GmailAuth {
                 "нет Gmail refresh token; запустите --gmail-login: {e}"
             ))
         })?;
+        let mut form = vec![
+            ("client_id", self.client_id.as_str()),
+            ("refresh_token", refresh.as_str()),
+            ("grant_type", "refresh_token"),
+        ];
+        if let Some(client_secret) = self.client_secret.as_deref() {
+            form.push(("client_secret", client_secret));
+        }
         let response = self
             .client
             .post(TOKEN_ENDPOINT)
-            .form(&[
-                ("client_id", self.client_id.as_str()),
-                ("refresh_token", refresh.as_str()),
-                ("grant_type", "refresh_token"),
-            ])
+            .form(&form)
             .send()
             .await
             .map_err(|e| AppError::Tool(format!("Gmail refresh network error: {e}")))?;
