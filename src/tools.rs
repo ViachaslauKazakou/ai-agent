@@ -178,6 +178,306 @@ fn ensure_inside(root: &Path, path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
+fn git_root(context: &ToolContext) -> Result<PathBuf, AppError> {
+    find_git_root(&context.working_dir)
+        .ok_or_else(|| AppError::UnsafeEdit("working_dir не является Git-репозиторием".to_owned()))
+}
+
+fn confirm_action(context: &ToolContext, prompt: &str) -> Result<(), AppError> {
+    if !context.interactive || !context.confirm_writes {
+        return Err(AppError::WriteConfirmationRequired);
+    }
+    print!("{prompt} [y/N] ");
+    io::stdout()
+        .flush()
+        .map_err(|error| AppError::Tool(error.to_string()))?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| AppError::Tool(error.to_string()))?;
+    if matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes" | "д" | "да"
+    ) {
+        Ok(())
+    } else {
+        Err(AppError::Tool(
+            "операция отклонена пользователем".to_owned(),
+        ))
+    }
+}
+
+async fn run_git(context: &ToolContext, args: &[&str]) -> Result<String, AppError> {
+    let root = git_root(context)?;
+    let output = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|error| AppError::Tool(format!("git недоступен: {error}")))?;
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() {
+        return Err(AppError::Tool(format!(
+            "git {}: {}",
+            args.join(" "),
+            text.trim()
+        )));
+    }
+    if let Some(secret) = find_secret(&text) {
+        return Err(AppError::UnsafeEdit(format!(
+            "вывод git содержит секрет: {secret}"
+        )));
+    }
+    Ok(text)
+}
+
+fn truncate_result(mut text: String, context: &ToolContext) -> ToolResult {
+    let truncated = text.len() > context.max_result_bytes;
+    if truncated {
+        text.truncate(context.max_result_bytes);
+    }
+    ToolResult {
+        success: true,
+        content: text,
+        structured: None,
+        truncated,
+        ephemeral: false,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum GitAction {
+    Status,
+    Diff,
+    Log,
+    Branch,
+    PrepareCommit,
+    Commit,
+    Push,
+    Pr,
+}
+
+macro_rules! git_tool {
+    ($type:ident, $name:literal, $description:literal, $action:ident, $schema:expr) => {
+        #[derive(Debug, Default)]
+        pub struct $type;
+        #[async_trait]
+        impl Tool for $type {
+            fn name(&self) -> &'static str {
+                $name
+            }
+            fn description(&self) -> &'static str {
+                $description
+            }
+            fn parameters_schema(&self) -> Value {
+                $schema
+            }
+            async fn execute(
+                &self,
+                args: Value,
+                context: &ToolContext,
+            ) -> Result<ToolResult, AppError> {
+                execute_git(GitAction::$action, args, context).await
+            }
+        }
+    };
+}
+
+git_tool!(
+    GitStatus,
+    "git_status",
+    "Show repository status in porcelain format.",
+    Status,
+    json!({"type":"object","properties":{},"additionalProperties":false})
+);
+git_tool!(
+    GitDiff,
+    "git_diff",
+    "Show the repository diff without changing files.",
+    Diff,
+    json!({"type":"object","properties":{"staged":{"type":"boolean"}},"additionalProperties":false})
+);
+git_tool!(
+    GitLog,
+    "git_log",
+    "Show recent repository commits.",
+    Log,
+    json!({"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false})
+);
+git_tool!(
+    GitCreateBranch,
+    "git_create_branch",
+    "Create and switch to a new Git branch after confirmation.",
+    Branch,
+    json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false})
+);
+git_tool!(
+    GitPrepareCommit,
+    "git_prepare_commit",
+    "Prepare a commit summary and detect secrets in staged changes.",
+    PrepareCommit,
+    json!({"type":"object","properties":{},"additionalProperties":false})
+);
+git_tool!(
+    GitCommit,
+    "git_commit",
+    "Create a commit only after explicit confirmation.",
+    Commit,
+    json!({"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false})
+);
+git_tool!(
+    GitPush,
+    "git_push",
+    "Push the current branch only after explicit confirmation.",
+    Push,
+    json!({"type":"object","properties":{"remote":{"type":"string"},"branch":{"type":"string"}},"additionalProperties":false})
+);
+git_tool!(
+    GitCreatePr,
+    "git_create_pr",
+    "Create a GitHub Pull Request through gh after explicit confirmation.",
+    Pr,
+    json!({"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"base":{"type":"string"}},"required":["title","body"],"additionalProperties":false})
+);
+
+async fn execute_git(
+    action: GitAction,
+    args: Value,
+    context: &ToolContext,
+) -> Result<ToolResult, AppError> {
+    let result = match action {
+        GitAction::Status => run_git(context, &["status", "--short", "--branch"]).await?,
+        GitAction::Diff => {
+            if args.get("staged").and_then(Value::as_bool).unwrap_or(false) {
+                run_git(context, &["diff", "--cached"]).await?
+            } else {
+                run_git(context, &["diff"]).await?
+            }
+        }
+        GitAction::Log => {
+            let limit = args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(10)
+                .clamp(1, 50)
+                .to_string();
+            run_git(context, &["log", "-n", &limit, "--oneline", "--decorate"]).await?
+        }
+        GitAction::Branch => {
+            let name = args
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::Tool("git_create_branch требует name".to_owned()))?;
+            validate_branch_name(name)?;
+            confirm_action(
+                context,
+                &format!("Создать и переключиться на ветку `{name}`?"),
+            )?;
+            run_git(context, &["switch", "-c", name]).await?
+        }
+        GitAction::PrepareCommit => {
+            let diff = run_git(context, &["diff", "--cached"]).await?;
+            if diff.trim().is_empty() {
+                return Err(AppError::Tool("нет staged изменений для commit".to_owned()));
+            }
+            format!("Staged diff готов к commit:\n{diff}")
+        }
+        GitAction::Commit => {
+            let message = args
+                .get("message")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::Tool("git_commit требует message".to_owned()))?;
+            if message.trim().is_empty() || message.contains('\n') {
+                return Err(AppError::Tool(
+                    "commit message должен быть непустым однострочным текстом".to_owned(),
+                ));
+            }
+            let staged = run_git(context, &["diff", "--cached"]).await?;
+            if staged.trim().is_empty() {
+                return Err(AppError::Tool("нет staged изменений для commit".to_owned()));
+            }
+            if let Some(secret) = find_secret(&staged) {
+                return Err(AppError::UnsafeEdit(format!(
+                    "commit заблокирован: {secret}"
+                )));
+            }
+            confirm_action(context, &format!("Создать commit `{message}`?"))?;
+            run_git(context, &["commit", "-m", message]).await?
+        }
+        GitAction::Push => {
+            let remote = args
+                .get("remote")
+                .and_then(Value::as_str)
+                .unwrap_or("origin");
+            let branch = args.get("branch").and_then(Value::as_str).unwrap_or("HEAD");
+            confirm_action(
+                context,
+                &format!("Отправить изменения в `{remote}/{branch}`?"),
+            )?;
+            run_git(context, &["push", remote, branch]).await?
+        }
+        GitAction::Pr => {
+            let title = args
+                .get("title")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::Tool("git_create_pr требует title".to_owned()))?;
+            let body = args
+                .get("body")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::Tool("git_create_pr требует body".to_owned()))?;
+            let base = args.get("base").and_then(Value::as_str).unwrap_or("main");
+            if let Some(secret) = find_secret(&format!("{title}\n{body}")) {
+                return Err(AppError::UnsafeEdit(format!("PR заблокирован: {secret}")));
+            }
+            confirm_action(
+                context,
+                &format!("Создать Pull Request `{title}` в `{base}`?"),
+            )?;
+            let root = git_root(context)?;
+            let output = tokio::process::Command::new("gh")
+                .args([
+                    "pr", "create", "--base", base, "--title", title, "--body", body,
+                ])
+                .current_dir(root)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await
+                .map_err(|error| AppError::Tool(format!("gh недоступен: {error}")))?;
+            let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&output.stderr));
+            if !output.status.success() {
+                return Err(AppError::Tool(format!("gh pr create: {}", text.trim())));
+            }
+            text
+        }
+    };
+    Ok(truncate_result(result, context))
+}
+
+fn validate_branch_name(name: &str) -> Result<(), AppError> {
+    if name.is_empty()
+        || name.starts_with('-')
+        || name.contains("..")
+        || name.contains(' ')
+        || name.contains('~')
+        || name.contains('^')
+        || name.contains(':')
+        || name.contains('?')
+        || name.contains('*')
+        || name.contains('[')
+        || name.ends_with('/')
+    {
+        return Err(AppError::Tool("некорректное имя Git-ветки".to_owned()));
+    }
+    Ok(())
+}
+
 /// Результат выполнения инструмента.
 #[derive(Debug, Clone)]
 pub struct ToolResult {
@@ -810,6 +1110,14 @@ pub fn default_registry() -> Result<ToolRegistry, AppError> {
     registry.register(WriteFile)?;
     registry.register(ApplyPatch)?;
     registry.register(RollbackLastChange)?;
+    registry.register(GitStatus)?;
+    registry.register(GitDiff)?;
+    registry.register(GitLog)?;
+    registry.register(GitCreateBranch)?;
+    registry.register(GitPrepareCommit)?;
+    registry.register(GitCommit)?;
+    registry.register(GitPush)?;
+    registry.register(GitCreatePr)?;
     registry.register(SearchFiles)?;
     registry.register(ReadLines)?;
     registry.register(ProjectSearch)?;
@@ -829,6 +1137,14 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
             "write_file" => registry.register(WriteFile)?,
             "apply_patch" => registry.register(ApplyPatch)?,
             "rollback_last_change" => registry.register(RollbackLastChange)?,
+            "git_status" => registry.register(GitStatus)?,
+            "git_diff" => registry.register(GitDiff)?,
+            "git_log" => registry.register(GitLog)?,
+            "git_create_branch" => registry.register(GitCreateBranch)?,
+            "git_prepare_commit" => registry.register(GitPrepareCommit)?,
+            "git_commit" => registry.register(GitCommit)?,
+            "git_push" => registry.register(GitPush)?,
+            "git_create_pr" => registry.register(GitCreatePr)?,
             "search_files" => registry.register(SearchFiles)?,
             "read_lines" => registry.register(ReadLines)?,
             "project_search" => registry.register(ProjectSearch)?,
