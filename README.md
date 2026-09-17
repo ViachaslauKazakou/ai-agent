@@ -15,6 +15,9 @@
   `list_recent_emails`, `get_email`, `search_emails` и опциональный `run_command`;
 - ограничение tools списком `enabled_tools`;
 - запись файлов выключена без явного `allow_write = true`;
+- diff-based редактирование через `apply_patch` с preview и подтверждением;
+- checkpoint перед записью и `rollback_last_change` для отката;
+- запрет `.env`, credential/secret-файлов и секретов в содержимом;
 - подтверждение записи в интерактивном режиме через `confirm_writes`;
 - `run_command` работает только для команд из `command_allowlist`;
 - ограничение agent loop через `max_tool_rounds`;
@@ -382,6 +385,8 @@ ai-agent
 | `read_file` | чтение файла |
 | `list_directory` | список каталога |
 | `write_file` | запись файла внутри `working_dir` |
+| `apply_patch` | preview и безопасное применение точечного patch |
+| `rollback_last_change` | откат последнего checkpoint |
 | `search_files` | поиск текста по файлам |
 | `read_lines` | чтение диапазона строк |
 | `project_search` | поиск по локальному индексу |

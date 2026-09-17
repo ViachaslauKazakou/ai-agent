@@ -241,6 +241,8 @@ impl Config {
                 "read_file".to_owned(),
                 "list_directory".to_owned(),
                 "write_file".to_owned(),
+                "apply_patch".to_owned(),
+                "rollback_last_change".to_owned(),
                 "search_files".to_owned(),
                 "read_lines".to_owned(),
                 "project_search".to_owned(),
@@ -296,6 +298,8 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
             "read_file"
                 | "list_directory"
                 | "write_file"
+                | "apply_patch"
+                | "rollback_last_change"
                 | "search_files"
                 | "read_lines"
                 | "project_search"

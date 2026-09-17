@@ -69,6 +69,10 @@ pub enum AppError {
     #[error("Запись файлов запрещена: запустите агент с --allow-write")]
     WriteConfirmationRequired,
 
+    /// Изменение не прошло проверку безопасности.
+    #[error("Безопасное редактирование отклонено: {0}")]
+    UnsafeEdit(String),
+
     /// Agent loop достиг заданного лимита раундов.
     #[error("Достигнут лимит раундов инструментов: {0}")]
     ToolRoundLimit(usize),

@@ -11,6 +11,7 @@ use std::{
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 use crate::index::ProjectIndex;
 use crate::{AppError, ToolDefinition};
@@ -70,6 +71,99 @@ impl ToolContext {
                 .ok_or_else(|| AppError::Tool("некорректное имя файла".to_owned()))?,
         ))
     }
+
+    fn validate_edit(&self, path: &Path, content: &str) -> Result<(), AppError> {
+        if is_protected_path(path) {
+            return Err(AppError::UnsafeEdit(format!(
+                "запрещённый секретный или credential-файл: {}",
+                path.display()
+            )));
+        }
+        if let Some(secret) = find_secret(content) {
+            return Err(AppError::UnsafeEdit(secret));
+        }
+        if find_git_root(&self.working_dir).is_none() {
+            return Err(AppError::UnsafeEdit(
+                "working_dir не находится внутри Git-репозитория".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn ensure_mutation_allowed(&self, path: &Path, content: &str) -> Result<(), AppError> {
+        self.validate_edit(path, content)?;
+        if !self.allow_write {
+            return Err(AppError::WriteConfirmationRequired);
+        }
+        Ok(())
+    }
+}
+
+fn find_git_root(path: &Path) -> Option<PathBuf> {
+    let mut current = path.canonicalize().ok()?;
+    loop {
+        if current.join(".git").exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn is_protected_path(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let lower = name.to_ascii_lowercase();
+    lower == ".env"
+        || lower.starts_with(".env.")
+        || lower.ends_with(".pem")
+        || lower.ends_with(".key")
+        || lower.ends_with(".p12")
+        || lower.ends_with(".pfx")
+        || lower.contains("credential")
+        || lower.contains("secret")
+        || lower.contains("token")
+}
+
+fn find_secret(content: &str) -> Option<String> {
+    const MARKERS: &[&str] = &[
+        "-----BEGIN ",
+        "ghp_",
+        "github_pat_",
+        "sk-",
+        "AKIA",
+        "xoxb-",
+        "access_token=",
+        "client_secret=",
+    ];
+    MARKERS
+        .iter()
+        .find(|marker| content.contains(**marker))
+        .map(|marker| format!("содержимое похоже на секрет (маркер `{marker}`)"))
+}
+
+fn checkpoint(path: &Path, content: &[u8]) -> Result<PathBuf, AppError> {
+    let root = path
+        .ancestors()
+        .find(|candidate| candidate.join(".git").exists())
+        .ok_or_else(|| AppError::UnsafeEdit("Git-репозиторий не найден".to_owned()))?;
+    let dir = root.join(".agent").join("checkpoints");
+    fs::create_dir_all(&dir).map_err(|error| AppError::Tool(error.to_string()))?;
+    let backup = dir.join(format!(
+        "{}-{}.bak",
+        Uuid::new_v4(),
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    fs::write(&backup, content).map_err(|error| AppError::Tool(error.to_string()))?;
+    fs::write(
+        dir.join("latest.json"),
+        json!({"path": path, "backup": backup}).to_string(),
+    )
+    .map_err(|error| AppError::Tool(error.to_string()))?;
+    Ok(backup)
 }
 
 fn ensure_inside(root: &Path, path: &Path) -> Result<(), AppError> {
@@ -324,12 +418,173 @@ impl Tool for WriteFile {
             ));
         }
         let path = context.resolve_new(path)?;
+        context.ensure_mutation_allowed(&path, content)?;
+        let previous = fs::read(&path).unwrap_or_default();
+        let backup = checkpoint(&path, &previous)?;
         fs::write(&path, content).map_err(|e| AppError::Tool(e.to_string()))?;
         Ok(ToolResult::success(format!(
-            "Записано {} байт в {}",
+            "Изменение применено после checkpoint {}: записано {} байт в {}",
+            backup.display(),
             content.len(),
             path.display()
         )))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ApplyPatch;
+
+#[async_trait]
+impl Tool for ApplyPatch {
+    fn name(&self) -> &'static str {
+        "apply_patch"
+    }
+    fn description(&self) -> &'static str {
+        "Preview and safely apply a single text replacement; apply=false only shows the diff."
+    }
+    fn parameters_schema(&self) -> Value {
+        json!({"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"apply":{"type":"boolean"}},"required":["path","old_text","new_text"],"additionalProperties":false})
+    }
+    async fn execute(&self, args: Value, context: &ToolContext) -> Result<ToolResult, AppError> {
+        let raw = args
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::Tool("apply_patch требует path".to_owned()))?;
+        let old = args
+            .get("old_text")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::Tool("apply_patch требует old_text".to_owned()))?;
+        let new = args
+            .get("new_text")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::Tool("apply_patch требует new_text".to_owned()))?;
+        if old.is_empty() {
+            return Err(AppError::Tool("old_text не может быть пустым".to_owned()));
+        }
+        let path = context.resolve_existing(raw)?;
+        let current =
+            fs::read_to_string(&path).map_err(|error| AppError::Tool(error.to_string()))?;
+        let occurrences = current.matches(old).count();
+        if occurrences != 1 {
+            return Err(AppError::UnsafeEdit(format!(
+                "ожидалось ровно одно совпадение, найдено {occurrences}"
+            )));
+        }
+        let updated = current.replacen(old, new, 1);
+        context.validate_edit(&path, &updated)?;
+        let diff = unified_diff(&path, &current, &updated);
+        if !args.get("apply").and_then(Value::as_bool).unwrap_or(false) {
+            return Ok(ToolResult::success(format!(
+                "Предпросмотр diff (изменение НЕ применено):\n{diff}"
+            )));
+        }
+        if !context.interactive || !context.confirm_writes {
+            return Err(AppError::WriteConfirmationRequired);
+        }
+        print!("Применить этот diff? [y/N] ");
+        io::stdout()
+            .flush()
+            .map_err(|error| AppError::Tool(error.to_string()))?;
+        let mut answer = String::new();
+        io::stdin()
+            .read_line(&mut answer)
+            .map_err(|error| AppError::Tool(error.to_string()))?;
+        if !matches!(
+            answer.trim().to_ascii_lowercase().as_str(),
+            "y" | "yes" | "д" | "да"
+        ) {
+            return Err(AppError::Tool("patch отклонён пользователем".to_owned()));
+        }
+        let backup = checkpoint(&path, current.as_bytes())?;
+        fs::write(&path, updated).map_err(|error| AppError::Tool(error.to_string()))?;
+        Ok(ToolResult::success(format!(
+            "Diff применён. Checkpoint: {}\n{diff}",
+            backup.display()
+        )))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct RollbackLastChange;
+
+#[async_trait]
+impl Tool for RollbackLastChange {
+    fn name(&self) -> &'static str {
+        "rollback_last_change"
+    }
+    fn description(&self) -> &'static str {
+        "Restore the last safe-edit checkpoint."
+    }
+    fn parameters_schema(&self) -> Value {
+        json!({"type":"object","properties":{},"additionalProperties":false})
+    }
+    async fn execute(&self, _args: Value, context: &ToolContext) -> Result<ToolResult, AppError> {
+        if !context.allow_write {
+            return Err(AppError::WriteConfirmationRequired);
+        }
+        if context.confirm_writes && context.interactive {
+            print!("Откатить последнее изменение? [y/N] ");
+            io::stdout()
+                .flush()
+                .map_err(|error| AppError::Tool(error.to_string()))?;
+            let mut answer = String::new();
+            io::stdin()
+                .read_line(&mut answer)
+                .map_err(|error| AppError::Tool(error.to_string()))?;
+            if !matches!(
+                answer.trim().to_ascii_lowercase().as_str(),
+                "y" | "yes" | "д" | "да"
+            ) {
+                return Err(AppError::Tool("откат отклонён пользователем".to_owned()));
+            }
+        }
+        let root = find_git_root(&context.working_dir)
+            .ok_or_else(|| AppError::UnsafeEdit("Git-репозиторий не найден".to_owned()))?;
+        let value: Value = serde_json::from_str(
+            &fs::read_to_string(root.join(".agent/checkpoints/latest.json"))
+                .map_err(|error| AppError::Tool(error.to_string()))?,
+        )
+        .map_err(|error| AppError::Tool(error.to_string()))?;
+        let path = context.resolve_existing(
+            value["path"]
+                .as_str()
+                .ok_or_else(|| AppError::Tool("checkpoint повреждён".to_owned()))?,
+        )?;
+        let backup = PathBuf::from(
+            value["backup"]
+                .as_str()
+                .ok_or_else(|| AppError::Tool("checkpoint повреждён".to_owned()))?,
+        );
+        let content = fs::read(&backup).map_err(|error| AppError::Tool(error.to_string()))?;
+        fs::write(&path, content).map_err(|error| AppError::Tool(error.to_string()))?;
+        Ok(ToolResult::success(format!(
+            "Последнее изменение отменено: {}",
+            path.display()
+        )))
+    }
+}
+
+fn unified_diff(path: &Path, before: &str, after: &str) -> String {
+    let mut diff = format!("--- a/{}\n+++ b/{}\n", path.display(), path.display());
+    for line in before.lines() {
+        diff.push_str(&format!("-{}\n", line));
+    }
+    for line in after.lines() {
+        diff.push_str(&format!("+{}\n", line));
+    }
+    diff
+}
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+
+    #[test]
+    fn detects_secret_markers_and_protected_names() {
+        assert!(find_secret("token=ghp_example").is_some());
+        assert!(is_protected_path(Path::new(".env")));
+        assert!(is_protected_path(Path::new("client_credentials.json")));
+        assert!(!is_protected_path(Path::new("src/main.rs")));
     }
 }
 
@@ -553,6 +808,8 @@ pub fn default_registry() -> Result<ToolRegistry, AppError> {
     registry.register(ReadFile)?;
     registry.register(ListDirectory)?;
     registry.register(WriteFile)?;
+    registry.register(ApplyPatch)?;
+    registry.register(RollbackLastChange)?;
     registry.register(SearchFiles)?;
     registry.register(ReadLines)?;
     registry.register(ProjectSearch)?;
@@ -570,6 +827,8 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
             "read_file" => registry.register(ReadFile)?,
             "list_directory" => registry.register(ListDirectory)?,
             "write_file" => registry.register(WriteFile)?,
+            "apply_patch" => registry.register(ApplyPatch)?,
+            "rollback_last_change" => registry.register(RollbackLastChange)?,
             "search_files" => registry.register(SearchFiles)?,
             "read_lines" => registry.register(ReadLines)?,
             "project_search" => registry.register(ProjectSearch)?,
