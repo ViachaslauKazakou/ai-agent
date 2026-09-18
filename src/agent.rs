@@ -165,6 +165,7 @@ impl<P: LlmProvider> Agent<P> {
         let mut summary = LoopSummary::default();
         let mut empty_response_retries = 0;
         let mut tool_parse_retries = 0;
+        let mut last_mail_result: Option<String> = None;
         for round in 0..self.max_tool_rounds {
             if let Some(limit) = self.max_elapsed
                 && started.elapsed() > limit
@@ -198,7 +199,15 @@ impl<P: LlmProvider> Agent<P> {
                 usage.add_assign(response_usage);
                 has_usage = true;
             }
-            self.messages.push(response.message.clone());
+            if response
+                .message
+                .content
+                .as_deref()
+                .is_some_and(|content| !content.trim().is_empty())
+                || response.message.tool_calls.is_some()
+            {
+                self.messages.push(response.message.clone());
+            }
 
             let Some(tool_calls) = response.message.tool_calls.clone() else {
                 let content = response
@@ -229,6 +238,18 @@ impl<P: LlmProvider> Agent<P> {
                             tool_call_id: None,
                         });
                         continue;
+                    }
+                    if let Some(mail) = last_mail_result {
+                        let content = format!(
+                            "Не удалось сформировать текстовый обзор после повторов модели. Ниже исходный результат почтового инструмента:\n\n{mail}\n\nЧерновики ответов не подготовлены: модель вернула пустой ответ."
+                        );
+                        session.add_message(Message::new(Role::Assistant, &content)?);
+                        return Ok(AgentResponse {
+                            content,
+                            tool_rounds: round,
+                            usage: has_usage.then_some(usage),
+                            summary,
+                        });
                     }
                     return Err(AppError::LlmResponse(
                         "LLM вернул пустой assistant response после 2 повторов".to_owned(),
@@ -280,6 +301,12 @@ impl<P: LlmProvider> Agent<P> {
                     .await;
                 let (content, persist) = match result {
                     Ok(result) => {
+                        if matches!(
+                            call.function.name.as_str(),
+                            "list_recent_emails" | "get_email" | "search_emails"
+                        ) {
+                            last_mail_result = Some(result.content.clone());
+                        }
                         if result.content.contains("diff") {
                             let size = result.content.len();
                             if size > self.max_diff_bytes {
