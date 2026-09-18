@@ -35,6 +35,26 @@
 - provider-neutral CI MVP: `ci_status` и `ci_failure_analysis` для GitHub Actions/GitLab CI/Jenkins;
 - unit-, integration- и HTTP-клиентские тесты.
 
+## Установка и инициализация проекта
+
+После установки бинарника командой `cargo install` его можно запускать из любой
+папки проекта:
+
+```bash
+cd my-project
+ai-agent --init
+# или просто ai-agent — инициализация выполняется автоматически
+```
+
+При первом запуске создаются `config.json`, `.aiagent/agents/default.toml`,
+`.aiagent/skills/testing/SKILL.md` и `.aiagent/checkpoints/`. `config.json`
+создаётся из `.env`, затем `.env.example`, а если этих файлов нет — из встроенного
+безопасного шаблона. Существующие файлы не перезаписываются.
+
+После создания JSON является основным источником runtime-настроек; CLI-параметры
+имеют наивысший приоритет. Секреты не выводятся в логах и `--verbose`, а
+`config.json` исключён из Git через `.gitignore`.
+
 ## Работа с почтой
 
 Агент умеет читать почту в режиме read-only. Поддерживаются Gmail и Outlook через
