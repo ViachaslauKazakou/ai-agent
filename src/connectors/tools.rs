@@ -30,7 +30,11 @@ fn source(context: &ToolContext) -> Result<Box<dyn MessageSource>, AppError> {
         .as_deref()
         .is_some_and(|client_id| !client_id.trim().is_empty())
     {
-        let auth = GmailAuth::from_env(std::time::Duration::from_secs(30))?;
+        let auth = GmailAuth::from_config(
+            std::time::Duration::from_secs(30),
+            context.gmail_client_id.clone().unwrap_or_default(),
+            context.gmail_client_secret.clone(),
+        )?;
         return Ok(Box::new(GmailMailClient::new(
             auth,
             std::time::Duration::from_secs(30),

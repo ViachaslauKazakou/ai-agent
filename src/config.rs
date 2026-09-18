@@ -36,6 +36,11 @@ struct JsonConfig {
     confirm_writes: Option<bool>,
     max_loop_seconds: Option<u64>,
     max_diff_bytes: Option<usize>,
+    microsoft_graph_client_id: Option<String>,
+    microsoft_graph_tenant: Option<String>,
+    microsoft_graph_scope: Option<String>,
+    google_gmail_client_id: Option<String>,
+    google_gmail_client_secret: Option<String>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -85,6 +90,11 @@ pub struct Config {
     pub confirm_writes: bool,
     pub max_loop_seconds: u64,
     pub max_diff_bytes: usize,
+    pub microsoft_graph_client_id: Option<String>,
+    pub microsoft_graph_tenant: Option<String>,
+    pub microsoft_graph_scope: Option<String>,
+    pub google_gmail_client_id: Option<String>,
+    pub google_gmail_client_secret: Option<String>,
 }
 
 impl fmt::Debug for Config {
@@ -128,6 +138,11 @@ impl Config {
             "confirm_writes": self.confirm_writes,
             "max_loop_seconds": self.max_loop_seconds,
             "max_diff_bytes": self.max_diff_bytes,
+            "microsoft_graph_client_id": self.microsoft_graph_client_id,
+            "microsoft_graph_tenant": self.microsoft_graph_tenant,
+            "microsoft_graph_scope": self.microsoft_graph_scope,
+            "google_gmail_client_id": self.google_gmail_client_id,
+            "google_gmail_client_secret": self.google_gmail_client_secret.as_ref().map(|_| "<redacted>"),
         });
 
         serde_json::to_string_pretty(&value).expect("configuration JSON should be serializable")
@@ -170,6 +185,31 @@ impl Config {
                 );
             }
             set_if_some(&mut environment, "RUST_LOG", config.log_level.clone());
+            set_if_some(
+                &mut environment,
+                "MICROSOFT_GRAPH_CLIENT_ID",
+                config.microsoft_graph_client_id.clone(),
+            );
+            set_if_some(
+                &mut environment,
+                "MICROSOFT_GRAPH_TENANT",
+                config.microsoft_graph_tenant.clone(),
+            );
+            set_if_some(
+                &mut environment,
+                "MICROSOFT_GRAPH_SCOPE",
+                config.microsoft_graph_scope.clone(),
+            );
+            set_if_some(
+                &mut environment,
+                "GOOGLE_GMAIL_CLIENT_ID",
+                config.google_gmail_client_id.clone(),
+            );
+            set_if_some(
+                &mut environment,
+                "GOOGLE_GMAIL_CLIENT_SECRET",
+                config.google_gmail_client_secret.clone(),
+            );
         }
 
         let config_path = cli
@@ -317,6 +357,11 @@ impl Config {
         let confirm_writes = file_agent.confirm_writes.unwrap_or(false);
         let max_loop_seconds = file_agent.max_loop_seconds.unwrap_or(600);
         let max_diff_bytes = file_agent.max_diff_bytes.unwrap_or(100_000);
+        let microsoft_graph_client_id = environment.get("MICROSOFT_GRAPH_CLIENT_ID").cloned();
+        let microsoft_graph_tenant = environment.get("MICROSOFT_GRAPH_TENANT").cloned();
+        let microsoft_graph_scope = environment.get("MICROSOFT_GRAPH_SCOPE").cloned();
+        let google_gmail_client_id = environment.get("GOOGLE_GMAIL_CLIENT_ID").cloned();
+        let google_gmail_client_secret = environment.get("GOOGLE_GMAIL_CLIENT_SECRET").cloned();
         if max_loop_seconds == 0 || max_diff_bytes == 0 {
             return Err(AppError::InvalidConfig(
                 "лимиты coding loop должны быть больше нуля".to_owned(),
@@ -340,6 +385,11 @@ impl Config {
             confirm_writes,
             max_loop_seconds,
             max_diff_bytes,
+            microsoft_graph_client_id,
+            microsoft_graph_tenant,
+            microsoft_graph_scope,
+            google_gmail_client_id,
+            google_gmail_client_secret,
         })
     }
 }
