@@ -308,7 +308,7 @@ async fn run_repl(
                     } else {
                         "выключены"
                     },
-                    config.enabled_tools.join(", ")
+                    active_profile.enabled_tools.join(", ")
                 ),
                 Some("on") => {
                     tools_enabled = true;
