@@ -501,7 +501,7 @@ const DEFAULT_AGENT: &[u8] = br#"description = "Default project agent"
 model = "demo-model"
 system_prompt = "Work safely in this project. Explain a plan before changes and run relevant checks."
     enabled_tools = ["read_file", "list_directory", "write_file", "create_file", "apply_patch", "project_symbols", "project_diagnostics", "security_review"]
-allow_write = false
+allow_write = true
 confirm_writes = true
 command_allowlist = []
 max_tool_rounds = 20

@@ -75,7 +75,11 @@ impl AgentCatalog {
                     profiles.remove("default");
                 }
                 let file: AgentFile = parse_file(&entry.path())?;
-                let profile = merge_profile(name.clone(), file, config)?;
+                let profile = if name == "default" {
+                    default_profile(config)
+                } else {
+                    merge_profile(name.clone(), file, config)?
+                };
                 validate_profile(&profile)?;
                 profiles.insert(name, profile);
             }
@@ -283,7 +287,7 @@ fn validate_profile(profile: &AgentProfile) -> Result<(), AppError> {
         && !profile
             .enabled_tools
             .iter()
-            .any(|tool| tool == "write_file")
+            .any(|tool| tool == "write_file" || tool == "create_file")
     {
         return Err(AppError::InvalidConfig(format!(
             "агент {} разрешает запись без write_file",
@@ -385,6 +389,30 @@ mod tests {
                 .system_prompt(profile)
                 .unwrap()
                 .contains("Run tests after changes.")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn default_profile_uses_json_permissions_over_legacy_template() {
+        let root = std::env::temp_dir().join(format!("ai-agent-default-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join(".aiagent/agents")).unwrap();
+        fs::write(
+            root.join(".aiagent/agents/default.toml"),
+            "allow_write = false\nenabled_tools = ['read_file']\n",
+        )
+        .unwrap();
+        let mut project_config = config(&root);
+        project_config.allow_write = true;
+        project_config.enabled_tools = vec!["read_file".to_owned(), "create_file".to_owned()];
+        let catalog = AgentCatalog::load(&root, &project_config).unwrap();
+        let profile = catalog.profile("default").unwrap();
+        assert!(profile.allow_write);
+        assert!(
+            profile
+                .enabled_tools
+                .iter()
+                .any(|tool| tool == "create_file")
         );
         fs::remove_dir_all(root).unwrap();
     }
