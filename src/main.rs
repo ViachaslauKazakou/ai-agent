@@ -1,6 +1,9 @@
 //! Консольная точка входа учебного AI-агента.
 
-use std::time::{Duration, Instant};
+use std::{
+    io::Write,
+    time::{Duration, Instant},
+};
 
 use ai_agent::cli::{Cli, ReplCommand, help_text, parse_repl_command};
 use ai_agent::{
@@ -727,7 +730,10 @@ async fn request_completion(
     println!("\n\x1b[2m┌─ Вы запрашиваете\x1b[0m");
     println!("\x1b[2m│\x1b[0m {prompt}");
     println!("\x1b[2m└─ Ответ\x1b[0m\n");
-    match agent.complete(session, prompt).await {
+    let spinner = Spinner::start();
+    let result = agent.complete(session, prompt).await;
+    spinner.stop();
+    match result {
         Ok(response) => {
             let summary = if is_coding_request(prompt) {
                 response.summary.render()
@@ -739,13 +745,55 @@ async fn request_completion(
                 response.content, summary
             );
             if show_stats {
-                print_response_stats(response.usage.as_ref(), started.elapsed().as_secs_f64());
+                print_response_stats(
+                    session.model(),
+                    response.usage.as_ref(),
+                    started.elapsed().as_secs_f64(),
+                );
             }
             if let Err(error) = session.save_to(session_path(session)) {
                 eprintln!("Предупреждение: не удалось сохранить сессию: {error}");
             }
         }
         Err(error) => eprintln!("Ошибка агента: {error}"),
+    }
+}
+
+struct Spinner {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Spinner {
+    fn start() -> Self {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let signal = stop.clone();
+        let handle = std::thread::spawn(move || {
+            let frames = ["|", "/", "-", "\\"];
+            let mut index = 0;
+            while !signal.load(std::sync::atomic::Ordering::Relaxed) {
+                print!(
+                    "\r\x1b[2m{} Модель думает...\x1b[0m",
+                    frames[index % frames.len()]
+                );
+                let _ = std::io::stdout().flush();
+                index += 1;
+                std::thread::sleep(Duration::from_millis(120));
+            }
+            print!("\r\x1b[2K");
+            let _ = std::io::stdout().flush();
+        });
+        Self {
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    fn stop(mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -799,19 +847,22 @@ fn print_banner(provider: &str, model: &str, show_stats: bool) {
     println!("\x1b[1;35m╰────────────────────────────────────────╯\x1b[0m\n");
 }
 
-fn print_response_stats(usage: Option<&ai_agent::Usage>, elapsed_secs: f64) {
+fn print_response_stats(model: &str, usage: Option<&ai_agent::Usage>, elapsed_secs: f64) {
     let tokens = usage.and_then(|value| value.total_tokens);
     let prompt_tokens = usage.and_then(|value| value.prompt_tokens);
     let completion_tokens = usage.and_then(|value| value.completion_tokens);
     match (tokens, prompt_tokens, completion_tokens) {
         (Some(total), Some(prompt), Some(completion)) => println!(
-            "\n\x1b[2m↳ {} токенов ({} prompt + {} ответ) · {:.2} с\x1b[0m\n",
+            "\n\x1b[2m↳ Модель: {model} · {} токенов ({} prompt + {} ответ) · {:.2} с\x1b[0m\n",
             format_number(total),
             format_number(prompt),
             format_number(completion),
             elapsed_secs
         ),
-        _ => println!("\n\x1b[2m↳ токены: н/д · {:.2} с\x1b[0m\n", elapsed_secs),
+        _ => println!(
+            "\n\x1b[2m↳ Модель: {model} · токены: н/д · {:.2} с\x1b[0m\n",
+            elapsed_secs
+        ),
     }
 }
 
