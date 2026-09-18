@@ -26,6 +26,11 @@ async fn main() {
         }
     };
 
+    if cli.init {
+        println!("Проект инициализирован: {}", config.working_dir.display());
+        return;
+    }
+
     if cli.graph_login {
         match ai_agent::connectors::auth::GraphAuth::from_env(Duration::from_secs(
             config.request_timeout_secs,

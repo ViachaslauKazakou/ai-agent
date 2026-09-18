@@ -32,6 +32,10 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub project_dir: Option<PathBuf>,
 
+    /// Создать project-local config.json и .aiagent, затем завершить работу.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub init: bool,
+
     /// Путь к TOML-конфигурации агента.
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
@@ -183,6 +187,7 @@ mod tests {
                 base_url: None,
                 working_dir: Some(PathBuf::from("/tmp/project")),
                 project_dir: None,
+                init: false,
                 config: None,
                 max_tool_rounds: None,
                 request_timeout_secs: None,

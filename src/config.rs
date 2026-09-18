@@ -15,7 +15,27 @@ const DEFAULT_MODEL: &str = "demo-model";
 const DEFAULT_MAX_TOOL_ROUNDS: usize = 20;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_LOG_LEVEL: &str = "info";
-const DEFAULT_CONFIG_FILE: &str = ".agent.toml";
+const JSON_CONFIG_FILE: &str = "config.json";
+
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+struct JsonConfig {
+    provider: Option<String>,
+    api_base_url: Option<String>,
+    api_key: Option<String>,
+    model: Option<String>,
+    working_dir: Option<String>,
+    max_tool_rounds: Option<usize>,
+    request_timeout_secs: Option<u64>,
+    log_level: Option<String>,
+    verbose: Option<bool>,
+    allow_write: Option<bool>,
+    enabled_tools: Option<Vec<String>>,
+    command_allowlist: Option<Vec<String>>,
+    confirm_writes: Option<bool>,
+    max_loop_seconds: Option<u64>,
+    max_diff_bytes: Option<usize>,
+}
 
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -115,26 +135,52 @@ impl Config {
     /// Загружает проектные `.env` и `.agent.toml`, затем применяет CLI.
     pub fn load(cli: &Cli) -> Result<Self, AppError> {
         let project_dir = resolve_project_dir(cli)?;
-        match dotenvy::from_path(project_dir.join(".env")) {
-            Ok(_) => {}
-            Err(dotenvy::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(AppError::EnvironmentFile(error.to_string())),
+        initialize_project(&project_dir)?;
+        let json_path = project_dir.join(JSON_CONFIG_FILE);
+        let json = load_json_config(&json_path)?;
+        let mut environment = env::vars().collect::<HashMap<_, _>>();
+        if json.is_none() {
+            match dotenvy::from_path(project_dir.join(".env")) {
+                Ok(_) => environment = env::vars().collect(),
+                Err(dotenvy::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(AppError::EnvironmentFile(error.to_string())),
+            }
+        }
+        if let Some(config) = &json {
+            set_if_some(&mut environment, "LLM_PROVIDER", config.provider.clone());
+            set_if_some(&mut environment, "MODEL", config.model.clone());
+            set_if_some(
+                &mut environment,
+                "LITELLM_BASE_URL",
+                config.api_base_url.clone(),
+            );
+            set_if_some(&mut environment, "LITELLM_API_KEY", config.api_key.clone());
+            set_if_some(&mut environment, "WORKING_DIR", config.working_dir.clone());
+            set_if_some(&mut environment, "RUST_LOG", config.log_level.clone());
         }
 
-        let environment = env::vars().collect::<HashMap<_, _>>();
         let config_path = cli
             .config
             .clone()
-            .unwrap_or_else(|| project_dir.join(DEFAULT_CONFIG_FILE));
+            .unwrap_or_else(|| project_dir.join(JSON_CONFIG_FILE));
         let config_path = if config_path.is_absolute() {
             config_path
         } else {
             project_dir.join(config_path)
         };
-        let file = load_file_config(&config_path)?;
+        let file =
+            if config_path.file_name().and_then(|name| name.to_str()) == Some(JSON_CONFIG_FILE) {
+                json.clone().unwrap_or_default().into_file_config()
+            } else {
+                load_file_config(&config_path)?
+            };
         let mut cli = cli.clone();
         if cli.working_dir.is_none() {
-            cli.working_dir = Some(project_dir);
+            cli.working_dir = json
+                .as_ref()
+                .and_then(|value| value.working_dir.clone())
+                .map(PathBuf::from)
+                .or(Some(project_dir));
         }
         Self::from_sources_with_file(&cli, &environment, file)
     }
@@ -284,6 +330,129 @@ impl Config {
         })
     }
 }
+
+impl JsonConfig {
+    fn into_file_config(self) -> FileConfig {
+        FileConfig {
+            agent: Some(AgentFileConfig {
+                max_tool_rounds: self.max_tool_rounds,
+                allow_write: self.allow_write,
+                enabled_tools: self.enabled_tools,
+                command_allowlist: self.command_allowlist,
+                confirm_writes: self.confirm_writes,
+                max_loop_seconds: self.max_loop_seconds,
+                max_diff_bytes: self.max_diff_bytes,
+            }),
+        }
+    }
+}
+
+pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
+    fs::create_dir_all(project_dir.join(".aiagent/agents"))
+        .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    for directory in ["skills", "checkpoints"] {
+        fs::create_dir_all(project_dir.join(".aiagent").join(directory))
+            .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    }
+    write_if_missing(
+        project_dir.join(".aiagent/agents/default.toml"),
+        DEFAULT_AGENT,
+    )?;
+    write_if_missing(
+        project_dir.join(".aiagent/skills/testing/SKILL.md"),
+        DEFAULT_SKILL,
+    )?;
+    let config_path = project_dir.join(JSON_CONFIG_FILE);
+    if config_path.exists() {
+        return Ok(false);
+    }
+    let values = load_env_file(project_dir.join(".env"))
+        .or_else(|| load_env_file(project_dir.join(".env.example")))
+        .unwrap_or_default();
+    let config = JsonConfig {
+        provider: values
+            .get("LLM_PROVIDER")
+            .cloned()
+            .or_else(|| Some(DEFAULT_PROVIDER.to_owned())),
+        api_base_url: values.get("LITELLM_BASE_URL").cloned(),
+        api_key: values
+            .get("LITELLM_API_KEY")
+            .cloned()
+            .filter(|value| !value.is_empty()),
+        model: values
+            .get("MODEL")
+            .cloned()
+            .or_else(|| Some(DEFAULT_MODEL.to_owned())),
+        working_dir: Some(".".to_owned()),
+        max_tool_rounds: values.get("MAX_TOOL_ROUNDS").and_then(|v| v.parse().ok()),
+        request_timeout_secs: values
+            .get("REQUEST_TIMEOUT_SECS")
+            .and_then(|v| v.parse().ok()),
+        log_level: values.get("RUST_LOG").cloned(),
+        ..Default::default()
+    };
+    let data = serde_json::to_vec_pretty(&config)
+        .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    write_if_missing(config_path, &data).map(|_| true)
+}
+
+fn load_json_config(path: &Path) -> Result<Option<JsonConfig>, AppError> {
+    match fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str(&content)
+            .map(Some)
+            .map_err(|error| AppError::AgentConfig(format!("{}: {error}", path.display()))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(AppError::AgentConfig(format!(
+            "{}: {error}",
+            path.display()
+        ))),
+    }
+}
+
+fn load_env_file(path: PathBuf) -> Option<HashMap<String, String>> {
+    let text = fs::read_to_string(path).ok()?;
+    Some(
+        text.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    return None;
+                }
+                let (key, value) = line.split_once('=')?;
+                Some((
+                    key.trim().to_owned(),
+                    value.trim().trim_matches('"').to_owned(),
+                ))
+            })
+            .collect(),
+    )
+}
+
+fn set_if_some(environment: &mut HashMap<String, String>, key: &str, value: Option<String>) {
+    if let Some(value) = value.filter(|value| !value.is_empty()) {
+        environment.insert(key.to_owned(), value);
+    }
+}
+
+fn write_if_missing(path: PathBuf, content: impl AsRef<[u8]>) -> Result<bool, AppError> {
+    if path.exists() {
+        return Ok(false);
+    }
+    fs::write(path, content).map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    Ok(true)
+}
+
+const DEFAULT_AGENT: &[u8] = br#"description = "Default project agent"
+model = "demo-model"
+system_prompt = "Work safely in this project. Explain a plan before changes and run relevant checks."
+enabled_tools = ["read_file", "list_directory", "apply_patch", "project_symbols", "project_diagnostics", "security_review"]
+allow_write = false
+confirm_writes = true
+command_allowlist = []
+max_tool_rounds = 20
+skills = ["testing"]
+"#;
+const DEFAULT_SKILL: &[u8] = b"description: Project testing guidance\n\nRun the relevant formatter, checker, and tests after changes.\n";
 
 fn resolve_project_dir(cli: &Cli) -> Result<PathBuf, AppError> {
     let raw = cli
