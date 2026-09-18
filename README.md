@@ -419,6 +419,7 @@ ai-agent
 | `read_file` | чтение файла |
 | `list_directory` | список каталога |
 | `write_file` | запись файла внутри `working_dir` |
+| `create_file` | создание нового файла без перезаписи существующего |
 | `apply_patch` | preview и безопасное применение точечного patch |
 | `rollback_last_change` | откат последнего checkpoint |
 | `git_status` | статус Git-репозитория |
