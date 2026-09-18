@@ -559,6 +559,7 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
         if !matches!(
             tool.as_str(),
             "read_file"
+                | "open_file"
                 | "list_directory"
                 | "write_file"
                 | "create_file"
