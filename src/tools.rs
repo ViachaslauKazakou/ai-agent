@@ -740,7 +740,7 @@ impl Tool for CreateFile {
         "create_file"
     }
     fn description(&self) -> &'static str {
-        "Create a new UTF-8 file without overwriting an existing file; requires --allow-write."
+        "Create a new UTF-8 file and any missing parent directories without overwriting an existing file; requires --allow-write. Use this for new files and folders such as src/main.py."
     }
     fn parameters_schema(&self) -> Value {
         json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false})
