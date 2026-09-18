@@ -12,6 +12,7 @@ use ai_agent::{
 };
 use clap::Parser;
 use dialoguer::Select;
+use dialoguer::{Confirm, Input, MultiSelect};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
 #[tokio::main]
@@ -351,9 +352,25 @@ async fn run_repl(
                 }
                 None => println!("Неизвестный агент: {name}"),
             },
+            ReplCommand::CreateAgent(name) => {
+                match create_agent_wizard(&config.working_dir, config, &catalog, name) {
+                    Ok(()) => {
+                        println!("Агент создан. Перезапустите /agents для обновления каталога.")
+                    }
+                    Err(error) => println!("Ошибка создания агента: {error}"),
+                }
+            }
             ReplCommand::Skills => {
                 for skill in catalog.skills() {
                     println!("- {}: {}", skill.name, skill.description);
+                }
+            }
+            ReplCommand::CreateSkill(name) => {
+                match create_skill_wizard(&config.working_dir, name) {
+                    Ok(()) => {
+                        println!("Skill создан. Перезапустите /skills для обновления каталога.")
+                    }
+                    Err(error) => println!("Ошибка создания skill: {error}"),
                 }
             }
             ReplCommand::Skill(name) => {
@@ -503,6 +520,114 @@ async fn run_repl(
             }
         }
     }
+}
+
+fn create_agent_wizard(
+    working_dir: &std::path::Path,
+    config: &Config,
+    catalog: &AgentCatalog,
+    name: Option<String>,
+) -> Result<(), ai_agent::AppError> {
+    let name = name.unwrap_or_else(|| {
+        Input::new()
+            .with_prompt("Имя агента (slug)")
+            .interact_text()
+            .unwrap_or_default()
+    });
+    let description: String = Input::new()
+        .with_prompt("Описание")
+        .default("Project-local agent".to_owned())
+        .interact_text()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+    let system_prompt = Input::new()
+        .with_prompt("System prompt")
+        .default("Работай безопасно в проекте и запускай проверки после изменений.".to_owned())
+        .interact_text()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+    let tools = config.enabled_tools.clone();
+    let selected = MultiSelect::new()
+        .with_prompt("Разрешённые tools")
+        .items(&tools)
+        .interact()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+    let enabled_tools = selected
+        .into_iter()
+        .map(|index| tools[index].clone())
+        .collect::<Vec<_>>();
+    let skills = catalog
+        .skills()
+        .map(|skill| skill.name.clone())
+        .collect::<Vec<_>>();
+    let selected_skills = if skills.is_empty() {
+        Vec::new()
+    } else {
+        MultiSelect::new()
+            .with_prompt("Skills агента")
+            .items(&skills)
+            .interact()
+            .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?
+            .into_iter()
+            .map(|index| skills[index].clone())
+            .collect()
+    };
+    let allow_write = Confirm::new()
+        .with_prompt("Разрешить запись файлов?")
+        .default(false)
+        .interact()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+    let profile = AgentProfile {
+        name: name.clone(),
+        description,
+        provider: config.provider.clone(),
+        model: config.model.clone(),
+        system_prompt,
+        enabled_tools,
+        allow_write,
+        confirm_writes: true,
+        command_allowlist: Vec::new(),
+        max_tool_rounds: config.max_tool_rounds,
+        skills: selected_skills,
+    };
+    println!("\nPreview агента {}:\n{}", name, toml::to_string_pretty(&serde_json::json!({"description": profile.description, "provider": profile.provider, "model": profile.model, "system_prompt": profile.system_prompt, "enabled_tools": profile.enabled_tools, "allow_write": profile.allow_write, "confirm_writes": profile.confirm_writes, "command_allowlist": profile.command_allowlist, "max_tool_rounds": profile.max_tool_rounds, "skills": profile.skills})).unwrap_or_default());
+    if !Confirm::new()
+        .with_prompt("Сохранить агента?")
+        .default(true)
+        .interact()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?
+    {
+        return Ok(());
+    }
+    AgentCatalog::create_agent(working_dir, &name, &profile)
+}
+
+fn create_skill_wizard(
+    working_dir: &std::path::Path,
+    name: Option<String>,
+) -> Result<(), ai_agent::AppError> {
+    let name = name.unwrap_or_else(|| {
+        Input::new()
+            .with_prompt("Имя skill (slug)")
+            .interact_text()
+            .unwrap_or_default()
+    });
+    let description: String = Input::new()
+        .with_prompt("Краткое описание")
+        .interact_text()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+    let content: String = Input::new()
+        .with_prompt("Инструкции skill")
+        .interact_text()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+    println!("\nPreview skill:\n# {name}\n\ndescription: {description}\n\n{content}\n");
+    if !Confirm::new()
+        .with_prompt("Сохранить skill?")
+        .default(true)
+        .interact()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?
+    {
+        return Ok(());
+    }
+    AgentCatalog::create_skill(working_dir, &name, &description, &content)
 }
 
 fn read_repl_input(editor: &mut DefaultEditor) -> Result<Option<String>, ReadlineError> {

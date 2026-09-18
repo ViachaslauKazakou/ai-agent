@@ -122,6 +122,70 @@ impl AgentCatalog {
         }
         Ok(prompt)
     }
+
+    pub fn create_agent(
+        working_dir: &Path,
+        name: &str,
+        profile: &AgentProfile,
+    ) -> Result<(), AppError> {
+        validate_slug(name)?;
+        let directory = working_dir.join(PROJECT_DIR).join("agents");
+        fs::create_dir_all(&directory).map_err(|error| AppError::AgentConfig(error.to_string()))?;
+        let path = directory.join(format!("{name}.toml"));
+        if path.exists() {
+            return Err(AppError::AgentConfig(format!(
+                "агент уже существует: {name}"
+            )));
+        }
+        let content = toml::to_string_pretty(&serde_json::json!({
+            "description": profile.description,
+            "provider": profile.provider,
+            "model": profile.model,
+            "system_prompt": profile.system_prompt,
+            "enabled_tools": profile.enabled_tools,
+            "allow_write": profile.allow_write,
+            "confirm_writes": profile.confirm_writes,
+            "command_allowlist": profile.command_allowlist,
+            "max_tool_rounds": profile.max_tool_rounds,
+            "skills": profile.skills,
+        }))
+        .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+        fs::write(path, content).map_err(|error| AppError::AgentConfig(error.to_string()))
+    }
+
+    pub fn create_skill(
+        working_dir: &Path,
+        name: &str,
+        description: &str,
+        content: &str,
+    ) -> Result<(), AppError> {
+        validate_slug(name)?;
+        let directory = working_dir.join(PROJECT_DIR).join("skills").join(name);
+        if directory.exists() {
+            return Err(AppError::AgentConfig(format!(
+                "skill уже существует: {name}"
+            )));
+        }
+        fs::create_dir_all(&directory).map_err(|error| AppError::AgentConfig(error.to_string()))?;
+        let markdown = format!("description: {description}\n\n{content}\n");
+        fs::write(directory.join("SKILL.md"), markdown)
+            .map_err(|error| AppError::AgentConfig(error.to_string()))
+    }
+}
+
+fn validate_slug(value: &str) -> Result<(), AppError> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || !value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(AppError::InvalidConfig(format!(
+            "некорректное имя: {value}"
+        )));
+    }
+    Ok(())
 }
 
 fn default_profile(config: &Config) -> AgentProfile {
