@@ -66,7 +66,7 @@ impl Tool for ListRecentEmails {
         "list_recent_emails"
     }
     fn description(&self) -> &'static str {
-        "List recent Outlook messages; returns headers and previews only."
+        "List recent Gmail or Outlook messages; returns headers and previews only. Use this when the user asks to check recent or today's mail."
     }
     fn parameters_schema(&self) -> Value {
         json!({"type":"object","properties":{"lookback_hours":{"type":"integer","minimum":1,"maximum":720},"max_messages":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false})
@@ -90,7 +90,7 @@ impl Tool for GetEmail {
         "get_email"
     }
     fn description(&self) -> &'static str {
-        "Read one Outlook email, including its body, on explicit request."
+        "Read one Gmail or Outlook email, including its body, on explicit request."
     }
     fn parameters_schema(&self) -> Value {
         json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false})
@@ -118,7 +118,7 @@ impl Tool for SearchEmails {
         "search_emails"
     }
     fn description(&self) -> &'static str {
-        "Search Outlook messages by query, without loading bodies."
+        "Search Gmail or Outlook messages by query, without loading bodies."
     }
     fn parameters_schema(&self) -> Value {
         json!({"type":"object","properties":{"query":{"type":"string"},"max_messages":{"type":"integer","minimum":1,"maximum":100}},"required":["query"],"additionalProperties":false})

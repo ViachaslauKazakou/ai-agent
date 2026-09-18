@@ -362,6 +362,18 @@ impl Config {
         let microsoft_graph_scope = environment.get("MICROSOFT_GRAPH_SCOPE").cloned();
         let google_gmail_client_id = environment.get("GOOGLE_GMAIL_CLIENT_ID").cloned();
         let google_gmail_client_secret = environment.get("GOOGLE_GMAIL_CLIENT_SECRET").cloned();
+        let mut enabled_tools = enabled_tools;
+        if (google_gmail_client_id.is_some() || microsoft_graph_client_id.is_some())
+            && !enabled_tools
+                .iter()
+                .any(|tool| tool == "list_recent_emails")
+        {
+            enabled_tools.extend([
+                "list_recent_emails".to_owned(),
+                "get_email".to_owned(),
+                "search_emails".to_owned(),
+            ]);
+        }
         if max_loop_seconds == 0 || max_diff_bytes == 0 {
             return Err(AppError::InvalidConfig(
                 "лимиты coding loop должны быть больше нуля".to_owned(),
