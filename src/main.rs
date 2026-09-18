@@ -388,8 +388,11 @@ async fn run_repl(
             }
             ReplCommand::Config => println!("{}", config.to_pretty_json()),
             ReplCommand::Permissions => println!(
-                "allow_write={}, confirm_writes={}, command_allowlist={:?}",
-                config.allow_write, config.confirm_writes, config.command_allowlist
+                "allow_write={}, confirm_writes={}, command_allowlist={:?}, enabled_tools={}",
+                config.allow_write,
+                config.confirm_writes,
+                config.command_allowlist,
+                active_profile.enabled_tools.join(", ")
             ),
             ReplCommand::Save => match session.save_to(session_path(session)) {
                 Ok(()) => println!("Сессия сохранена."),
@@ -678,8 +681,19 @@ async fn request_completion(
             return;
         }
     };
-    let mut context = ToolContext::new(&config.working_dir, profile.allow_write);
-    context.confirm_writes = profile.confirm_writes;
+    let mut context = ToolContext::new(
+        &config.working_dir,
+        if profile.name == "default" {
+            config.allow_write
+        } else {
+            profile.allow_write
+        },
+    );
+    context.confirm_writes = if profile.name == "default" {
+        config.confirm_writes
+    } else {
+        profile.confirm_writes
+    };
     context.command_allowlist = profile.command_allowlist.clone();
     context.interactive = true;
     context.graph_base_url = std::env::var("MICROSOFT_GRAPH_BASE_URL").ok();

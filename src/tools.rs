@@ -1234,6 +1234,7 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
     for name in names {
         match name.as_str() {
             "read_file" => registry.register(ReadFile)?,
+            "open_file" => registry.register(ReadFile)?,
             "list_directory" => registry.register(ListDirectory)?,
             "write_file" => registry.register(WriteFile)?,
             "create_file" => registry.register(CreateFile)?,

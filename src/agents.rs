@@ -253,6 +253,7 @@ fn validate_profile(profile: &AgentProfile) -> Result<(), AppError> {
         if !matches!(
             tool.as_str(),
             "read_file"
+                | "open_file"
                 | "list_directory"
                 | "write_file"
                 | "create_file"
