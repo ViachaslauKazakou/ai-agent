@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{cli::Cli, AppError};
+use crate::{AppError, cli::Cli};
 
 const DEFAULT_BASE_URL: &str = "http://localhost:4000/v1";
 const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
@@ -537,7 +537,7 @@ mod project_root_tests {
         let cli = Cli::try_parse_from(["ai-agent", "--working-dir", "/tmp"]).unwrap();
         assert_eq!(
             resolve_project_dir(&cli).unwrap(),
-            std::path::PathBuf::from("/tmp")
+            std::path::PathBuf::from("/tmp").canonicalize().unwrap()
         );
     }
 }
@@ -658,7 +658,7 @@ fn absolute_existing_directory(value: &str) -> Result<PathBuf, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{initialize_project, AgentFileConfig, Config, FileConfig};
+    use super::{AgentFileConfig, Config, FileConfig, initialize_project};
     use crate::cli::Cli;
     use clap::Parser;
     use std::{collections::HashMap, path::Path};
