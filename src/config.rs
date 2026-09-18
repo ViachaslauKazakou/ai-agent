@@ -155,7 +155,18 @@ impl Config {
                 config.api_base_url.clone(),
             );
             set_if_some(&mut environment, "LITELLM_API_KEY", config.api_key.clone());
-            set_if_some(&mut environment, "WORKING_DIR", config.working_dir.clone());
+            if let Some(working_dir) = &config.working_dir {
+                let path = PathBuf::from(working_dir);
+                let resolved = if path.is_absolute() {
+                    path
+                } else {
+                    project_dir.join(path)
+                };
+                environment.insert(
+                    "WORKING_DIR".to_owned(),
+                    resolved.to_string_lossy().into_owned(),
+                );
+            }
             set_if_some(&mut environment, "RUST_LOG", config.log_level.clone());
         }
 
@@ -176,11 +187,7 @@ impl Config {
             };
         let mut cli = cli.clone();
         if cli.working_dir.is_none() {
-            cli.working_dir = json
-                .as_ref()
-                .and_then(|value| value.working_dir.clone())
-                .map(PathBuf::from)
-                .or(Some(project_dir));
+            cli.working_dir = Some(project_dir);
         }
         Self::from_sources_with_file(&cli, &environment, file)
     }
@@ -354,14 +361,14 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
         fs::create_dir_all(project_dir.join(".aiagent").join(directory))
             .map_err(|error| AppError::AgentConfig(error.to_string()))?;
     }
-    write_if_missing(
-        project_dir.join(".aiagent/agents/default.toml"),
-        DEFAULT_AGENT,
-    )?;
-    write_if_missing(
-        project_dir.join(".aiagent/skills/testing/SKILL.md"),
-        DEFAULT_SKILL,
-    )?;
+    let agent_path = project_dir.join(".aiagent/agents/default.toml");
+    let skill_path = project_dir.join(".aiagent/skills/testing/SKILL.md");
+    fs::create_dir_all(agent_path.parent().expect("agent path has parent"))
+        .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    fs::create_dir_all(skill_path.parent().expect("skill path has parent"))
+        .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    write_if_missing(agent_path, DEFAULT_AGENT)?;
+    write_if_missing(skill_path, DEFAULT_SKILL)?;
     let config_path = project_dir.join(JSON_CONFIG_FILE);
     if config_path.exists() {
         return Ok(false);
@@ -573,7 +580,7 @@ fn absolute_existing_directory(value: &str) -> Result<PathBuf, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentFileConfig, Config, FileConfig};
+    use super::{AgentFileConfig, Config, FileConfig, initialize_project};
     use crate::cli::Cli;
     use clap::Parser;
     use std::{collections::HashMap, path::Path};
@@ -725,5 +732,17 @@ mod tests {
             result.unwrap_err(),
             crate::AppError::UnknownTool("shell".to_owned())
         );
+    }
+
+    #[test]
+    fn initializes_empty_project_idempotently() {
+        let root = std::env::temp_dir().join(format!("ai-bootstrap-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(initialize_project(&root).unwrap());
+        assert!(!initialize_project(&root).unwrap());
+        assert!(root.join("config.json").is_file());
+        assert!(root.join(".aiagent/agents/default.toml").is_file());
+        assert!(root.join(".aiagent/skills/testing/SKILL.md").is_file());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
