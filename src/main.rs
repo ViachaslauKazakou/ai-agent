@@ -711,7 +711,11 @@ async fn request_completion(
     println!("\x1b[2m└─ Ответ\x1b[0m\n");
     match agent.complete(session, prompt).await {
         Ok(response) => {
-            println!("\x1b[1;32m◆ Assistant\x1b[0m\n{}", response.content);
+            println!(
+                "\x1b[1;32m◆ Assistant\x1b[0m\n{}{}",
+                response.content,
+                response.summary.render()
+            );
             if show_stats {
                 print_response_stats(response.usage.as_ref(), started.elapsed().as_secs_f64());
             }

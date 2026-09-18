@@ -23,6 +23,41 @@ pub struct LoopSummary {
     pub remaining_issues: Vec<String>,
 }
 
+impl LoopSummary {
+    pub fn render(&self) -> String {
+        let files = if self.changed_files.is_empty() {
+            "- нет изменений файлов".to_owned()
+        } else {
+            self.changed_files
+                .iter()
+                .map(|file| format!("- {file}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let checks = if self.checks.is_empty() {
+            "- не запускались через tools".to_owned()
+        } else {
+            self.checks
+                .iter()
+                .map(|check| format!("- {check}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let issues = if self.remaining_issues.is_empty() {
+            "- нет зафиксированных проблем".to_owned()
+        } else {
+            self.remaining_issues
+                .iter()
+                .map(|issue| format!("- {issue}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        format!(
+            "\n\n## Итог\n\nИзменённые файлы:\n{files}\n\nПроверки:\n{checks}\n\nОставшиеся проблемы:\n{issues}"
+        )
+    }
+}
+
 /// Координатор LLM и зарегистрированных инструментов.
 pub struct Agent<P> {
     provider: P,
@@ -99,7 +134,7 @@ impl<P: LlmProvider> Agent<P> {
             if let Some(prompt) = &self.system_prompt {
                 let prompt = if self.workflow_prompt {
                     format!(
-                        "{prompt}\n\nCoding workflow: analyze -> state a short plan -> apply small patches -> review diff -> run relevant tests/checkers -> fix failures -> report changed files, checks, and remaining issues. Effective permissions: allow_write={}, enabled_tools={}. For a new file use create_file; it creates missing parent directories automatically (for example src/main.py creates src/). write_file also creates parent directories; do not first call list_directory to decide whether a requested new directory exists. apply_patch only edits an existing file. Never claim file or directory creation is impossible when create_file or write_file is available. Stop and ask for clarification before ambiguous or dangerous actions.",
+                        "{prompt}\n\nCoding workflow: analyze -> state a short plan -> apply small patches -> review diff -> run relevant tests/checkers -> fix failures -> report what was found, changed files, exact changes, checks, and remaining issues. The host will append a structured final summary. Effective permissions: allow_write={}, enabled_tools={}. For a new file use create_file; it creates missing parent directories automatically (for example src/main.py creates src/). write_file also creates parent directories; do not first call list_directory to decide whether a requested new directory exists. apply_patch only edits an existing file. Never claim file or directory creation is impossible when create_file or write_file is available. Stop and ask for clarification before ambiguous or dangerous actions.",
                         self.context.allow_write,
                         self.registry.names().join(", ")
                     )
@@ -347,5 +382,14 @@ mod tests {
                 .any(|message| message.content() == "Готово")
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn renders_structured_summary_with_defaults() {
+        let summary = LoopSummary::default();
+        let rendered = summary.render();
+        assert!(rendered.contains("## Итог"));
+        assert!(rendered.contains("нет изменений файлов"));
+        assert!(rendered.contains("нет зафиксированных проблем"));
     }
 }
