@@ -187,6 +187,7 @@ fn validate_profile(profile: &AgentProfile) -> Result<(), AppError> {
             "read_file"
                 | "list_directory"
                 | "write_file"
+                | "create_file"
                 | "apply_patch"
                 | "rollback_last_change"
                 | "git_status"

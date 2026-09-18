@@ -732,6 +732,81 @@ impl Tool for WriteFile {
 }
 
 #[derive(Debug, Default)]
+pub struct CreateFile;
+
+#[async_trait]
+impl Tool for CreateFile {
+    fn name(&self) -> &'static str {
+        "create_file"
+    }
+    fn description(&self) -> &'static str {
+        "Create a new UTF-8 file without overwriting an existing file; requires --allow-write."
+    }
+    fn parameters_schema(&self) -> Value {
+        json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false})
+    }
+    async fn execute(&self, args: Value, context: &ToolContext) -> Result<ToolResult, AppError> {
+        if !context.allow_write {
+            return Err(AppError::WriteConfirmationRequired);
+        }
+        let raw = args
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::Tool("create_file требует path".to_owned()))?;
+        let content = args
+            .get("content")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::Tool("create_file требует content".to_owned()))?;
+        if content.len() > context.max_file_bytes {
+            return Err(AppError::Tool(
+                "создаваемый текст превышает лимит".to_owned(),
+            ));
+        }
+        let path = context.resolve_new(raw)?;
+        if path.exists() {
+            return Err(AppError::UnsafeEdit(format!(
+                "файл уже существует: {}",
+                path.display()
+            )));
+        }
+        context.ensure_mutation_allowed(&path, content)?;
+        if context.confirm_writes && context.interactive {
+            print!("Создать файл {}? [y/N] ", path.display());
+            io::stdout()
+                .flush()
+                .map_err(|error| AppError::Tool(error.to_string()))?;
+            let mut answer = String::new();
+            io::stdin()
+                .read_line(&mut answer)
+                .map_err(|error| AppError::Tool(error.to_string()))?;
+            if !matches!(
+                answer.trim().to_ascii_lowercase().as_str(),
+                "y" | "yes" | "д" | "да"
+            ) {
+                return Err(AppError::Tool(
+                    "создание файла отклонено пользователем".to_owned(),
+                ));
+            }
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| AppError::Tool(error.to_string()))?;
+        }
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|error| AppError::Tool(error.to_string()))?;
+        file.write_all(content.as_bytes())
+            .map_err(|error| AppError::Tool(error.to_string()))?;
+        Ok(ToolResult::success(format!(
+            "Создан новый файл: {} ({} байт)",
+            path.display(),
+            content.len()
+        )))
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct ApplyPatch;
 
 #[async_trait]
@@ -1108,6 +1183,7 @@ pub fn default_registry() -> Result<ToolRegistry, AppError> {
     registry.register(ReadFile)?;
     registry.register(ListDirectory)?;
     registry.register(WriteFile)?;
+    registry.register(CreateFile)?;
     crate::project_intelligence::register(&mut registry)?;
     crate::security_review::register(&mut registry)?;
     crate::ci::register(&mut registry)?;
@@ -1138,6 +1214,7 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
             "read_file" => registry.register(ReadFile)?,
             "list_directory" => registry.register(ListDirectory)?,
             "write_file" => registry.register(WriteFile)?,
+            "create_file" => registry.register(CreateFile)?,
             "project_symbols" => registry.register(crate::project_intelligence::SymbolIndex)?,
             "project_diagnostics" => {
                 registry.register(crate::project_intelligence::ProjectDiagnostics)?

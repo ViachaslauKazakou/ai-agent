@@ -465,7 +465,7 @@ fn write_if_missing(path: PathBuf, content: impl AsRef<[u8]>) -> Result<bool, Ap
 const DEFAULT_AGENT: &[u8] = br#"description = "Default project agent"
 model = "demo-model"
 system_prompt = "Work safely in this project. Explain a plan before changes and run relevant checks."
-enabled_tools = ["read_file", "list_directory", "apply_patch", "project_symbols", "project_diagnostics", "security_review"]
+    enabled_tools = ["read_file", "list_directory", "write_file", "create_file", "apply_patch", "project_symbols", "project_diagnostics", "security_review"]
 allow_write = false
 confirm_writes = true
 command_allowlist = []
@@ -502,6 +502,7 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
             "read_file"
                 | "list_directory"
                 | "write_file"
+                | "create_file"
                 | "apply_patch"
                 | "rollback_last_change"
                 | "git_status"
@@ -529,9 +530,14 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
             return Err(AppError::UnknownTool(tool.clone()));
         }
     }
-    if allow_write && !tools.iter().any(|tool| tool == "write_file") {
+    if allow_write
+        && !tools
+            .iter()
+            .any(|tool| tool == "write_file" || tool == "create_file")
+    {
         return Err(AppError::InvalidConfig(
-            "allow_write = true требует добавления write_file в enabled_tools".to_owned(),
+            "allow_write = true требует добавления write_file или create_file в enabled_tools"
+                .to_owned(),
         ));
     }
     Ok(())
