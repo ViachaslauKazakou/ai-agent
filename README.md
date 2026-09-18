@@ -425,6 +425,7 @@ ai-agent
 | `list_directory` | список каталога |
 | `write_file` | запись файла внутри `working_dir` |
 | `create_file` | создание нового файла без перезаписи существующего |
+| `delete_file` | безопасное удаление одного файла с checkpoint |
 | `apply_patch` | preview и безопасное применение точечного patch |
 | `rollback_last_change` | откат последнего checkpoint |
 | `git_status` | статус Git-репозитория |

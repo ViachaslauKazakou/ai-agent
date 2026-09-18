@@ -134,6 +134,14 @@ fn is_protected_path(path: &Path) -> bool {
         || lower.contains("token")
 }
 
+fn is_protected_delete_path(path: &Path, root: &Path) -> bool {
+    path == root.join(".git")
+        || path == root.join(".aiagent")
+        || path.starts_with(root.join(".git"))
+        || path.starts_with(root.join(".aiagent"))
+        || is_protected_path(path)
+}
+
 fn find_secret(content: &str) -> Option<String> {
     const MARKERS: &[&str] = &[
         "-----BEGIN ",
@@ -821,6 +829,69 @@ impl Tool for CreateFile {
 #[derive(Debug, Default)]
 pub struct ApplyPatch;
 
+#[derive(Debug, Default)]
+pub struct DeleteFile;
+
+#[async_trait]
+impl Tool for DeleteFile {
+    fn name(&self) -> &'static str {
+        "delete_file"
+    }
+    fn description(&self) -> &'static str {
+        "Delete one regular file inside working_dir after checkpoint and confirmation; never recursively deletes directories."
+    }
+    fn parameters_schema(&self) -> Value {
+        json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false})
+    }
+    async fn execute(&self, args: Value, context: &ToolContext) -> Result<ToolResult, AppError> {
+        if !context.allow_write {
+            return Err(AppError::WriteConfirmationRequired);
+        }
+        let raw = args
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::Tool("delete_file требует path".to_owned()))?;
+        let path = context.resolve_existing(raw)?;
+        if !path.is_file() {
+            return Err(AppError::UnsafeEdit(
+                "delete_file удаляет только обычные файлы, не каталоги".to_owned(),
+            ));
+        }
+        if is_protected_delete_path(&path, &context.working_dir) {
+            return Err(AppError::UnsafeEdit(format!(
+                "защищённый файл или каталог нельзя удалить: {}",
+                path.display()
+            )));
+        }
+        let previous = fs::read(&path).map_err(|error| AppError::Tool(error.to_string()))?;
+        let backup = checkpoint(&path, &previous)?;
+        if context.confirm_writes && context.interactive {
+            print!("Удалить файл {}? [y/N] ", path.display());
+            io::stdout()
+                .flush()
+                .map_err(|error| AppError::Tool(error.to_string()))?;
+            let mut answer = String::new();
+            io::stdin()
+                .read_line(&mut answer)
+                .map_err(|error| AppError::Tool(error.to_string()))?;
+            if !matches!(
+                answer.trim().to_ascii_lowercase().as_str(),
+                "y" | "yes" | "д" | "да"
+            ) {
+                return Err(AppError::Tool(
+                    "удаление отклонено пользователем".to_owned(),
+                ));
+            }
+        }
+        fs::remove_file(&path).map_err(|error| AppError::Tool(error.to_string()))?;
+        Ok(ToolResult::success(format!(
+            "Файл удалён после checkpoint {}: {}",
+            backup.display(),
+            path.display()
+        )))
+    }
+}
+
 #[async_trait]
 impl Tool for ApplyPatch {
     fn name(&self) -> &'static str {
@@ -972,6 +1043,14 @@ mod safety_tests {
         assert!(is_protected_path(Path::new(".env")));
         assert!(is_protected_path(Path::new("client_credentials.json")));
         assert!(!is_protected_path(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn protects_project_runtime_files_from_delete() {
+        let root = Path::new("/tmp/project");
+        assert!(is_protected_delete_path(&root.join(".git/config"), root));
+        assert!(is_protected_delete_path(&root.join(".aiagent/config.json"), root));
+        assert!(!is_protected_delete_path(&root.join("src/main.py"), root));
     }
 
     #[test]
@@ -1206,6 +1285,7 @@ pub fn default_registry() -> Result<ToolRegistry, AppError> {
     registry.register(ListDirectory)?;
     registry.register(WriteFile)?;
     registry.register(CreateFile)?;
+    registry.register(DeleteFile)?;
     crate::project_intelligence::register(&mut registry)?;
     crate::security_review::register(&mut registry)?;
     crate::ci::register(&mut registry)?;
@@ -1238,6 +1318,7 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
             "list_directory" => registry.register(ListDirectory)?,
             "write_file" => registry.register(WriteFile)?,
             "create_file" => registry.register(CreateFile)?,
+            "delete_file" => registry.register(DeleteFile)?,
             "project_symbols" => registry.register(crate::project_intelligence::SymbolIndex)?,
             "project_diagnostics" => {
                 registry.register(crate::project_intelligence::ProjectDiagnostics)?

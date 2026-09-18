@@ -563,6 +563,7 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
                 | "list_directory"
                 | "write_file"
                 | "create_file"
+                | "delete_file"
                 | "apply_patch"
                 | "rollback_last_change"
                 | "git_status"
