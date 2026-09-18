@@ -103,6 +103,8 @@ pub enum ReplCommand {
     Models,
     Agents,
     Agent(Option<String>),
+    /// Показать или выбрать рабочую роль (alias для `/agent`).
+    Role(Option<String>),
     Skills,
     Skill(String),
     /// Показать или изменить имя модели текущей сессии.
@@ -151,6 +153,7 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
         "/models" => ReplCommand::Models,
         "/agents" => ReplCommand::Agents,
         "/agent" => ReplCommand::Agent((!argument.is_empty()).then(|| argument.to_owned())),
+        "/role" => ReplCommand::Role((!argument.is_empty()).then(|| argument.to_owned())),
         "/skills" => ReplCommand::Skills,
         "/skill" if !argument.is_empty() => ReplCommand::Skill(argument.to_owned()),
         "/skill" => ReplCommand::Unknown(input.to_owned()),
@@ -169,7 +172,7 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
 
 /// Возвращает текст справки REPL.
 pub fn help_text() -> &'static str {
-    "Команды:\n  /help          показать эту справку\n  /status        показать состояние сессии\n  /tools         показать состояние и доступные tools\n  /tools on|off  включить/выключить tools для текущего запуска\n  /models        показать доступные модели\n  /agents        показать project-local агентов\n  /agent [NAME]  показать или выбрать агента\n  /create-agent  создать project-local агента через wizard\n  /skills        показать project-local skills\n  /skill NAME    выбрать skill агента\n  /create-skill  создать project-local skill через wizard\n  /config        показать конфигурацию\n  /permissions   показать permissions\n  /index         построить/обновить индекс проекта\n  /index status  показать состояние индекса\n  /search QUERY  поиск по индексированным фрагментам\n  /model         показать текущую модель\n  /model NAME    изменить имя модели\n  /stats         показать настройки статистики\n  /stats on|off  включить/выключить токены и время\n  /clear         очистить историю\n  /save, /load   сохранить/загрузить историю\n  /exit, /quit   выйти из REPL\n\nКонфигурация агентов и skills хранится в .aiagent/.\nЛюбой другой текст добавляется как сообщение пользователя."
+    "Команды:\n  /help          показать эту справку\n  /status        показать состояние сессии\n  /tools         показать состояние и доступные tools\n  /tools on|off  включить/выключить tools для текущего запуска\n  /models        показать доступные модели\n  /agents        показать project-local агентов\n  /agent [NAME]  показать или выбрать агента\n  /role [NAME]   показать или выбрать рабочую роль\n  /create-agent  создать project-local агента через wizard\n  /skills        показать project-local skills\n  /skill NAME    выбрать skill агента\n  /create-skill  создать project-local skill через wizard\n  /config        показать конфигурацию\n  /permissions   показать permissions\n  /index         построить/обновить индекс проекта\n  /index status  показать состояние индекса\n  /search QUERY  поиск по индексированным фрагментам\n  /model         показать текущую модель\n  /model NAME    изменить имя модели\n  /stats         показать настройки статистики\n  /stats on|off  включить/выключить токены и время\n  /clear         очистить историю\n  /save, /load   сохранить/загрузить историю\n  /exit, /quit   выйти из REPL\n\nКонфигурация агентов и skills хранится в .aiagent/.\nЛюбой другой текст добавляется как сообщение пользователя."
 }
 
 #[cfg(test)]
@@ -221,6 +224,15 @@ mod tests {
         assert_eq!(parse_repl_command("/exit"), ReplCommand::Quit);
         assert_eq!(parse_repl_command("/quit"), ReplCommand::Quit);
         assert_eq!(parse_repl_command("/models"), ReplCommand::Models);
+        assert_eq!(
+            parse_repl_command("/role secretary"),
+            ReplCommand::Role(Some("secretary".to_owned()))
+        );
+        assert_eq!(parse_repl_command("/role"), ReplCommand::Role(None));
+        assert_eq!(
+            parse_repl_command("/role create"),
+            ReplCommand::Role(Some("create".to_owned()))
+        );
         assert_eq!(
             parse_repl_command("/model local"),
             ReplCommand::Model(Some("local".to_owned()))

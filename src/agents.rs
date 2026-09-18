@@ -104,6 +104,10 @@ impl AgentCatalog {
         self.profiles.get(name)
     }
 
+    pub fn profile_names(&self) -> impl Iterator<Item = &str> {
+        self.profiles.keys().map(String::as_str)
+    }
+
     pub fn profiles(&self) -> impl Iterator<Item = &AgentProfile> {
         self.profiles.values()
     }
@@ -392,6 +396,25 @@ mod tests {
                 .system_prompt(profile)
                 .unwrap()
                 .contains("Run tests after changes.")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn validates_specialized_role_tool_boundaries() {
+        let root = std::env::temp_dir().join(format!("ai-agent-roles-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join(".aiagent/agents")).unwrap();
+        fs::write(
+            root.join(".aiagent/agents/secretary.toml"),
+            "enabled_tools = ['list_recent_emails', 'list_calendar_events']\n",
+        )
+        .unwrap();
+        let catalog = AgentCatalog::load(&root, &config(&root)).unwrap();
+        let secretary = catalog.profile("secretary").unwrap();
+        assert!(!secretary.allow_write);
+        assert_eq!(
+            secretary.enabled_tools,
+            vec!["list_recent_emails", "list_calendar_events"]
         );
         fs::remove_dir_all(root).unwrap();
     }
