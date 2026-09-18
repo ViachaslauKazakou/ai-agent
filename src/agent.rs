@@ -155,6 +155,11 @@ impl<P: LlmProvider> Agent<P> {
                         AppError::LlmResponse("ответ не содержит content или tool_calls".to_owned())
                     })?
                     .to_owned();
+                if content.trim().is_empty() {
+                    return Err(AppError::LlmResponse(
+                        "LLM вернул пустой assistant response без tool_calls".to_owned(),
+                    ));
+                }
                 session.add_message(Message::new(Role::Assistant, &content)?);
                 return Ok(AgentResponse {
                     content,
@@ -164,7 +169,11 @@ impl<P: LlmProvider> Agent<P> {
                 });
             };
 
-            if let Ok(message) = LlmMessage::from_tool_response(&response.message) {
+            if let Ok(message) = LlmMessage::from_tool_response(&response.message)
+                && (message.role() != Role::Assistant
+                    || message.tool_calls().is_some()
+                    || !message.content().trim().is_empty())
+            {
                 session.add_message(message);
             }
 
