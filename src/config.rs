@@ -448,7 +448,7 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
     let values = load_env_file(project_dir.join(".env"))
         .or_else(|| load_env_file(project_dir.join(".env.example")))
         .unwrap_or_default();
-    let config = JsonConfig {
+    let mut config = JsonConfig {
         provider: values
             .get("LLM_PROVIDER")
             .cloned()
@@ -470,6 +470,21 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
         log_level: values.get("RUST_LOG").cloned(),
         ..Default::default()
     };
+    if config.google_gmail_client_id.is_some() || config.microsoft_graph_client_id.is_some() {
+        config.enabled_tools = Some(vec![
+            "read_file".to_owned(),
+            "list_directory".to_owned(),
+            "write_file".to_owned(),
+            "create_file".to_owned(),
+            "apply_patch".to_owned(),
+            "project_symbols".to_owned(),
+            "project_diagnostics".to_owned(),
+            "security_review".to_owned(),
+            "list_recent_emails".to_owned(),
+            "get_email".to_owned(),
+            "search_emails".to_owned(),
+        ]);
+    }
     let data = serde_json::to_vec_pretty(&config)
         .map_err(|error| AppError::AgentConfig(error.to_string()))?;
     write_if_missing(config_path, &data).map(|_| true)
@@ -886,5 +901,26 @@ mod tests {
         assert!(root.join(".aiagent/agents/default.toml").is_file());
         assert!(root.join(".aiagent/skills/testing/SKILL.md").is_file());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn configured_mail_tools_are_visible_in_effective_config() {
+        let cli = Cli::try_parse_from(["ai-agent"]).unwrap();
+        let mut environment = HashMap::new();
+        environment.insert("GOOGLE_GMAIL_CLIENT_ID".to_owned(), "client".to_owned());
+        let config = Config::from_sources(&cli, &environment).unwrap();
+        assert!(
+            config
+                .enabled_tools
+                .iter()
+                .any(|tool| tool == "list_recent_emails")
+        );
+        assert!(config.enabled_tools.iter().any(|tool| tool == "get_email"));
+        assert!(
+            config
+                .enabled_tools
+                .iter()
+                .any(|tool| tool == "search_emails")
+        );
     }
 }
