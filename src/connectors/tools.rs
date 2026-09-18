@@ -161,7 +161,11 @@ async fn calendar_events(
     context: &ToolContext,
 ) -> Result<Vec<CalendarEvent>, AppError> {
     let (from, to, limit) = calendar_range(args);
-    if context.google_calendar_client_id.is_some() {
+    if context
+        .google_calendar_client_id
+        .as_deref()
+        .is_some_and(|id| !id.trim().is_empty())
+    {
         let auth = GmailAuth::from_config_with_scope(
             std::time::Duration::from_secs(30),
             context

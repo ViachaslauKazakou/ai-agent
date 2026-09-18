@@ -17,10 +17,14 @@ pub async fn list_events(
     }
     #[cfg(target_os = "macos")]
     {
-        let script = r#"const Calendar = Application('Calendar');
-const from = new Date(JSON.parse($.getenv('AI_CAL_FROM')));
-const to = new Date(JSON.parse($.getenv('AI_CAL_TO')));
-const max = Number($.getenv('AI_CAL_LIMIT'));
+        let script = r#"ObjC.import('Foundation');
+function env(name) {
+  return ObjC.unwrap($.NSProcessInfo.processInfo.environment.objectForKey(name));
+}
+const Calendar = Application('Calendar');
+const from = new Date(env('AI_CAL_FROM'));
+const to = new Date(env('AI_CAL_TO'));
+const max = Number(env('AI_CAL_LIMIT'));
 let out = [];
 for (const cal of Calendar.calendars()) {
   for (const event of cal.events()) {
@@ -31,8 +35,8 @@ for (const cal of Calendar.calendars()) {
 JSON.stringify(out);"#;
         let output = tokio::process::Command::new("osascript")
             .args(["-l", "JavaScript", "-e", script])
-            .env("AI_CAL_FROM", serde_json::to_string(from).unwrap())
-            .env("AI_CAL_TO", serde_json::to_string(to).unwrap())
+            .env("AI_CAL_FROM", from)
+            .env("AI_CAL_TO", to)
             .env("AI_CAL_LIMIT", limit.to_string())
             .kill_on_drop(true)
             .output()

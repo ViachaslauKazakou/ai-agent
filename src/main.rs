@@ -719,14 +719,11 @@ async fn request_completion(
     context.graph_scope = config.microsoft_graph_scope.clone();
     context.gmail_client_id = config.google_gmail_client_id.clone();
     context.gmail_client_secret = config.google_gmail_client_secret.clone();
-    context.google_calendar_client_id = config
-        .google_calendar_client_id
-        .clone()
-        .or_else(|| config.google_gmail_client_id.clone());
-    context.google_calendar_client_secret = config
-        .google_calendar_client_secret
-        .clone()
-        .or_else(|| config.google_gmail_client_secret.clone());
+    // Keep Calendar credentials separate from Gmail credentials. When the
+    // Calendar client is not configured, the connector must use macOS Calendar
+    // instead of attempting a Google OAuth flow.
+    context.google_calendar_client_id = config.google_calendar_client_id.clone();
+    context.google_calendar_client_secret = config.google_calendar_client_secret.clone();
     let system_prompt = match catalog.system_prompt(profile) {
         Ok(prompt) => prompt,
         Err(error) => {
