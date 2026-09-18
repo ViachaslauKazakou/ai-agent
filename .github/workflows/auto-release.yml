@@ -17,7 +17,7 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -100,24 +100,34 @@ jobs:
           CURRENT_VERSION: ${{ steps.current_version.outputs.version }}
           RELEASE_TYPE: ${{ steps.release_type.outputs.type }}
         run: |
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          case "$RELEASE_TYPE" in
-            major)
-              MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
-              ;;
-            minor)
-              MINOR=$((MINOR + 1)); PATCH=0
-              ;;
-            patch)
-              PATCH=$((PATCH + 1))
-              ;;
-            *)
-              echo "Unsupported release type: $RELEASE_TYPE" >&2
-              exit 1
-              ;;
-          esac
-
-          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          LAST_VERSION="${LAST_TAG#v}"
+          if [ -n "$LAST_TAG" ] \
+            && [ "$CURRENT_VERSION" != "$LAST_VERSION" ] \
+            && [ "$(printf '%s\n' "$LAST_VERSION" "$CURRENT_VERSION" | sort -V | tail -n 1)" = "$CURRENT_VERSION" ]; then
+            # A previous run already prepared a Cargo.toml bump PR. Once that
+            # PR is merged, release the version stored in Cargo.toml instead
+            # of incrementing it a second time.
+            NEW_VERSION="$CURRENT_VERSION"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+            case "$RELEASE_TYPE" in
+              major)
+                MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1)); PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+              *)
+                echo "Unsupported release type: $RELEASE_TYPE" >&2
+                exit 1
+                ;;
+            esac
+            NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          fi
           while git show-ref --tags --verify --quiet "refs/tags/v$NEW_VERSION"; do
             PATCH=$((PATCH + 1))
             NEW_VERSION="$MAJOR.$MINOR.$PATCH"
@@ -150,27 +160,33 @@ jobs:
           PY
           cargo check --manifest-path "$MANIFEST_PATH"
 
-      - name: 💾 Commit Cargo version
+      - name: 📝 Open Cargo version bump PR
+        id: version_bump
+        uses: peter-evans/create-pull-request@v7
         env:
           NEW_VERSION: ${{ steps.new_version.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$MANIFEST_PATH"
-          if git diff --cached --quiet; then
-            echo "Cargo.toml already contains version $NEW_VERSION"
-          else
-            git commit -m "chore: bump version to $NEW_VERSION [skip-ci]"
-            git push origin HEAD:main
-          fi
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/bump-cargo-version-${{ steps.new_version.outputs.version }}
+          delete-branch: true
+          commit-message: "chore: bump version to ${{ steps.new_version.outputs.version }}"
+          title: "chore: bump Cargo version to ${{ steps.new_version.outputs.version }}"
+          body: |
+            Automated version bump for release `v${{ steps.new_version.outputs.version }}`.
+
+            This PR is created because `main` requires all changes to go through a pull request.
+          add-paths: |
+            ${{ env.MANIFEST_PATH }}
 
       - name: ✅ Validate and build
+        if: steps.version_bump.outputs.pull-request-number == ''
         run: |
           cargo fmt --all -- --check
           cargo test --all-targets
           cargo build --release --locked
 
       - name: 📦 Package Linux binary
+        if: steps.version_bump.outputs.pull-request-number == ''
         env:
           NEW_VERSION: ${{ steps.new_version.outputs.version }}
         run: |
@@ -180,6 +196,7 @@ jobs:
         id: package
 
       - name: 📝 Generate changelog
+        if: steps.version_bump.outputs.pull-request-number == ''
         id: changelog
         env:
           CURRENT_VERSION: ${{ steps.current_version.outputs.version }}
@@ -202,6 +219,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 🎉 Create GitHub Release
+        if: steps.version_bump.outputs.pull-request-number == ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.new_version.outputs.version }}
@@ -223,6 +241,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 📊 Summary
+        if: steps.version_bump.outputs.pull-request-number == ''
         run: |
           {
             echo "## 🎉 Release Summary"
