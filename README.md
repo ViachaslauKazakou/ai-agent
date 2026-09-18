@@ -36,6 +36,7 @@
 - provider-neutral CI MVP: `ci_status` и `ci_failure_analysis` для GitHub Actions/GitLab CI/Jenkins;
 - unit-, integration- и HTTP-клиентские тесты.
 - REPL с history, навигацией стрелками, Home/End, Ctrl-R и многострочным вводом через `\\`.
+- `/model` без аргумента открывает интерактивный picker доступных моделей с выбором стрелками и Enter; выбранная модель сохраняется в `config.json`.
 
 ## Установка и инициализация проекта
 
