@@ -281,7 +281,12 @@ async fn run_repl(
 ) {
     let mut show_stats = true;
     let mut tools_enabled = true;
-    print_banner(&config.provider, &active_profile.model, show_stats);
+    print_banner(
+        &config.provider,
+        &active_profile.name,
+        &active_profile.model,
+        show_stats,
+    );
     if config.verbose {
         print_status(session);
     }
@@ -367,6 +372,38 @@ async fn run_repl(
                     }
                 }
                 None => println!("Неизвестный агент: {name}"),
+            },
+            ReplCommand::Role(name) => match name {
+                None => println!("Активная роль: {}", active_profile.name),
+                Some(name) if name == "create" => {
+                    match create_role_wizard(&config.working_dir, config, &catalog) {
+                        Ok(()) => println!(
+                            "Роль создана. Перезапустите /agents или приложение, чтобы обновить каталог."
+                        ),
+                        Err(error) => println!("Ошибка создания роли: {error}"),
+                    }
+                }
+                Some(name) => match catalog.profile(&name) {
+                    Some(profile) => {
+                        active_profile = profile.clone();
+                        if let Err(error) = session.set_model(&active_profile.model) {
+                            println!("Ошибка модели роли: {error}");
+                        } else {
+                            match ConfiguredProvider::new(config, &active_profile) {
+                                Ok(new_provider) => {
+                                    provider = new_provider;
+                                    println!(
+                                        "Активная роль: {}\nTools: {}",
+                                        active_profile.name,
+                                        active_profile.enabled_tools.join(", ")
+                                    );
+                                }
+                                Err(error) => println!("Ошибка provider роли: {error}"),
+                            }
+                        }
+                    }
+                    None => println!("Неизвестная роль: {name}"),
+                },
             },
             ReplCommand::CreateAgent(name) => {
                 match create_agent_wizard(&config.working_dir, config, &catalog, name) {
@@ -619,6 +656,229 @@ fn create_agent_wizard(
     AgentCatalog::create_agent(working_dir, &name, &profile)
 }
 
+fn create_role_wizard(
+    working_dir: &std::path::Path,
+    config: &Config,
+    catalog: &AgentCatalog,
+) -> Result<(), ai_agent::AppError> {
+    let name: String = Input::new()
+        .with_prompt("Имя роли (slug)")
+        .interact_text()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+    let description: String = Input::new()
+        .with_prompt("Что должна делать эта роль?")
+        .interact_text()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+
+    let normalized = description.to_lowercase();
+    let secretary = [
+        "почт",
+        "email",
+        "mail",
+        "календар",
+        "calendar",
+        "встреч",
+        "секретар",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+    let analyst = [
+        "анализ",
+        "аналит",
+        "исслед",
+        "review",
+        "отч",
+        "ci",
+        "security",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+    let coding = [
+        "код",
+        "разработ",
+        "программ",
+        "файл",
+        "рефактор",
+        "coding",
+        "code",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+
+    let (enabled_tools, skills, _generated_allow_write, system_prompt) = if secretary && !coding {
+        (
+            vec![
+                "list_recent_emails".to_owned(),
+                "get_email".to_owned(),
+                "search_emails".to_owned(),
+                "list_calendar_events".to_owned(),
+            ],
+            vec!["email-recap".to_owned(), "calendar-planning".to_owned()],
+            false,
+            "Ты личный ассистент. Работай только с доступными read-only источниками и уточняй неоднозначные даты и периоды.",
+        )
+    } else if coding {
+        (
+            vec![
+                "read_file".to_owned(),
+                "list_directory".to_owned(),
+                "search_files".to_owned(),
+                "read_lines".to_owned(),
+                "project_search".to_owned(),
+                "project_symbols".to_owned(),
+                "project_definition".to_owned(),
+                "project_diagnostics".to_owned(),
+                "apply_patch".to_owned(),
+                "git_status".to_owned(),
+                "git_diff".to_owned(),
+                "git_log".to_owned(),
+            ],
+            vec!["testing".to_owned(), "coding".to_owned()],
+            true,
+            "Ты coding-agent. Планируй работу, вноси минимальные изменения и запускай релевантные проверки.",
+        )
+    } else if analyst {
+        (
+            vec![
+                "read_file".to_owned(),
+                "list_directory".to_owned(),
+                "search_files".to_owned(),
+                "read_lines".to_owned(),
+                "project_search".to_owned(),
+                "project_symbols".to_owned(),
+                "project_definition".to_owned(),
+                "project_diagnostics".to_owned(),
+                "security_review".to_owned(),
+                "git_status".to_owned(),
+                "git_diff".to_owned(),
+                "git_log".to_owned(),
+            ],
+            vec!["analysis".to_owned()],
+            false,
+            "Ты аналитик. Отделяй факты от предположений, не изменяй файлы и давай структурированные выводы.",
+        )
+    } else {
+        (
+            config.enabled_tools.clone(),
+            catalog.skills().map(|skill| skill.name.clone()).collect(),
+            false,
+            "Ты специализированный AI-агент. Соблюдай ограничения доступных tools и working directory.",
+        )
+    };
+
+    let setup_mode = Select::new()
+        .with_prompt("Как настроить tools роли?")
+        .items(&["Автоматически по описанию", "Выбрать вручную"])
+        .default(0)
+        .interact()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+    let mut enabled_tools = if setup_mode == 1 {
+        let available_tools = [
+            "read_file",
+            "list_directory",
+            "search_files",
+            "read_lines",
+            "project_search",
+            "project_symbols",
+            "project_definition",
+            "project_diagnostics",
+            "security_review",
+            "ci_status",
+            "ci_failure_analysis",
+            "git_status",
+            "git_diff",
+            "git_log",
+            "list_recent_emails",
+            "get_email",
+            "search_emails",
+            "list_calendar_events",
+            "write_file",
+            "create_file",
+            "apply_patch",
+            "delete_file",
+            "run_command",
+        ];
+        let selected = MultiSelect::new()
+            .with_prompt("Разрешённые tools (пробел — выбрать, Enter — продолжить)")
+            .items(&available_tools)
+            .interact()
+            .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?;
+        selected
+            .into_iter()
+            .map(|index| available_tools[index].to_owned())
+            .collect()
+    } else {
+        enabled_tools
+    };
+    let has_write_tools = enabled_tools.iter().any(|tool| {
+        matches!(
+            tool.as_str(),
+            "write_file" | "create_file" | "apply_patch" | "delete_file" | "run_command"
+        )
+    });
+    let allow_write = if has_write_tools {
+        Confirm::new()
+            .with_prompt("Разрешить write tools для этой роли?")
+            .default(false)
+            .interact()
+            .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?
+    } else {
+        false
+    };
+    if !allow_write {
+        enabled_tools.retain(|tool| {
+            !matches!(
+                tool.as_str(),
+                "write_file" | "create_file" | "apply_patch" | "delete_file" | "run_command"
+            )
+        });
+    }
+
+    let available_skills = catalog
+        .skills()
+        .map(|skill| skill.name.as_str())
+        .collect::<Vec<_>>();
+    let skills = skills
+        .into_iter()
+        .filter(|skill| available_skills.iter().any(|available| *available == skill))
+        .collect::<Vec<_>>();
+    let profile = AgentProfile {
+        name: name.clone(),
+        description,
+        provider: config.provider.clone(),
+        model: config.model.clone(),
+        system_prompt: system_prompt.to_owned(),
+        enabled_tools,
+        allow_write,
+        confirm_writes: allow_write,
+        command_allowlist: Vec::new(),
+        max_tool_rounds: config.max_tool_rounds,
+        skills,
+    };
+
+    println!(
+        "\nСгенерированная роль {}:\n{}",
+        name,
+        toml::to_string_pretty(&serde_json::json!({
+            "description": profile.description,
+            "system_prompt": profile.system_prompt,
+            "enabled_tools": profile.enabled_tools,
+            "allow_write": profile.allow_write,
+            "skills": profile.skills,
+        }))
+        .unwrap_or_default()
+    );
+    if !Confirm::new()
+        .with_prompt("Сохранить роль?")
+        .default(true)
+        .interact()
+        .map_err(|e| ai_agent::AppError::Tool(e.to_string()))?
+    {
+        return Ok(());
+    }
+    AgentCatalog::create_agent(working_dir, &name, &profile)
+}
+
 fn create_skill_wizard(
     working_dir: &std::path::Path,
     name: Option<String>,
@@ -851,13 +1111,14 @@ mod summary_tests {
     }
 }
 
-fn print_banner(provider: &str, model: &str, show_stats: bool) {
+fn print_banner(provider: &str, role: &str, model: &str, show_stats: bool) {
     println!("\n\x1b[1;35m╭────────────────────────────────────────╮\x1b[0m");
     println!(
         "\x1b[1;35m│\x1b[0m  \x1b[1mAI Agent v{}\x1b[0m  ·  \x1b[36m{provider}\x1b[0m",
         env!("CARGO_PKG_VERSION")
     );
     println!("\x1b[1;35m│\x1b[0m  Модель: \x1b[1m{model}\x1b[0m");
+    println!("\x1b[1;35m│\x1b[0m  Роль:   \x1b[1m{role}\x1b[0m");
     println!(
         "\x1b[1;35m│\x1b[0m  Статистика: {}  ·  /help для команд",
         if show_stats { "on" } else { "off" }

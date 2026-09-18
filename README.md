@@ -29,6 +29,7 @@
 - переключение tools во время REPL командами `/tools on` и `/tools off`;
 - project-local агенты в `.aiagent/agents/*.toml`;
 - project-local skills в `.aiagent/skills/<name>/SKILL.md`;
+- специализированные роли `coder`, `analyst` и `secretary` с раздельными tools и permissions;
 - инкрементальный JSON-индекс проекта в `.aiagent/index.json`;
 - P1 project intelligence tools: `project_symbols`, `project_definition`, `project_diagnostics`;
 - P1 `security_review` для типовых security и quality findings;
@@ -42,6 +43,7 @@
 - Структурированный `## Итог` показывается только для coding/security задач; mail и обычные информационные запросы получают обычный ответ без блока изменений.
 - Во время ожидания ответа LLM в REPL отображается spinner; статистика показывает фактически использованную модель вместе с токенами и временем.
 - `/create-agent [NAME]` и `/create-skill [NAME]` создают project-local конфигурацию через wizard с preview и подтверждением.
+- `/role [NAME]` переключает рабочую роль, а `/role create` создаёт новую роль через диалог с автоматическим подбором tools и skills по описанию.
 - `create_file` автоматически создаёт отсутствующие родительские каталоги, поэтому отдельная команда `mkdir` для создания `src/` не требуется.
 
 ## Установка и инициализация проекта
@@ -403,6 +405,9 @@ ai-agent
 /agents        показать project-local профили
 /agent         показать текущий профиль
 /agent NAME    переключить профиль
+/role          показать текущую роль
+/role NAME     переключить роль
+/role create   создать роль через диалог
 /skills        показать доступные skills
 /skill NAME    активировать skill текущего профиля
 /config        показать конфигурацию без API key
@@ -448,7 +453,7 @@ ai-agent
 | `ci_status` | обнаружение CI-конфигураций |
 | `ci_failure_analysis` | анализ bounded CI-логов |
 
-Команды `/create-agent` и `/create-skill` сохраняют файлы только в `.aiagent/`,
+Команды `/create-agent`, `/create-skill` и `/role create` сохраняют файлы только в `.aiagent/`,
 не перезаписывают существующие сущности и отклоняют небезопасные имена. Wizard
 спрашивает основные параметры, разрешённые tools/skills, permissions и инструкции,
 после чего показывает preview перед записью.
@@ -521,14 +526,34 @@ Project-local настройки хранятся в `.aiagent/`:
 ```text
 .aiagent/
 ├── agents/
+│   ├── coder.toml
+│   ├── analyst.toml
+│   ├── secretary.toml
 │   └── reviewer.toml
 └── skills/
-    └── testing/
-        └── SKILL.md
+    ├── testing/SKILL.md
+    ├── coding/SKILL.md
+    ├── analysis/SKILL.md
+    ├── email-recap/SKILL.md
+    └── calendar-planning/SKILL.md
 ```
 
 Профиль задаёт модель, provider, system prompt, tools, permissions, лимит
 tool rounds и список skills. Профиль по умолчанию создаётся автоматически.
+При инициализации также создаются готовые роли `coder`, `analyst` и `secretary`.
+`coder` предназначен для разработки и может получать write tools с подтверждением,
+`analyst` работает в read-only режиме с проектом, Git и CI, а `secretary` имеет
+только read-only доступ к почте и календарю. Переключение выполняется командами
+`/role coder`, `/role analyst` или `/role secretary`.
+
+Команда `/role create` принимает имя роли и свободное описание. По описанию
+подбирается базовый профиль (coding, analysis или secretary), после чего можно
+выбрать автоматическую настройку tools или вручную отметить разрешённые tools.
+Перед сохранением показываются сгенерированные system prompt, tools, permissions
+и skills. Write tools (`write_file`, `create_file`, `apply_patch`, `delete_file`,
+`run_command`) дополнительно требуют явного подтверждения; без него они удаляются
+из профиля. Сохранение самой роли также требует подтверждения. Skills только
+добавляют инструкции в system prompt и не расширяют список tools или permissions.
 Пример профиля находится в
 `.aiagent/agents/reviewer.toml.example`, пример skill — в
 `.aiagent/skills/testing/SKILL.md`.

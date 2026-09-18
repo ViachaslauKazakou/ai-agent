@@ -348,7 +348,6 @@ impl<P: LlmProvider> Agent<P> {
 
         Err(AppError::ToolRoundLimit(self.max_tool_rounds))
     }
-
 }
 
 fn is_provider_tool_parse_error(error: &AppError) -> bool {

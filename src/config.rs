@@ -470,6 +470,28 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
         .map_err(|error| AppError::AgentConfig(error.to_string()))?;
     write_if_missing(agent_path, DEFAULT_AGENT)?;
     write_if_missing(skill_path, DEFAULT_SKILL)?;
+    for (name, content) in [
+        ("coder", CODER_AGENT),
+        ("analyst", ANALYST_AGENT),
+        ("secretary", SECRETARY_AGENT),
+    ] {
+        write_if_missing(
+            project_dir
+                .join(".aiagent/agents")
+                .join(format!("{name}.toml")),
+            content.as_bytes(),
+        )?;
+    }
+    for (name, content) in [
+        ("coding", CODING_SKILL),
+        ("analysis", ANALYSIS_SKILL),
+        ("email-recap", EMAIL_RECAP_SKILL),
+        ("calendar-planning", CALENDAR_SKILL),
+    ] {
+        let directory = project_dir.join(".aiagent/skills").join(name);
+        fs::create_dir_all(&directory).map_err(|error| AppError::AgentConfig(error.to_string()))?;
+        write_if_missing(directory.join("SKILL.md"), content)?;
+    }
     let config_path = project_dir.join(PROJECT_CONFIG_PATH);
     if config_path.exists() {
         return Ok(false);
@@ -622,6 +644,37 @@ max_tool_rounds = 20
 skills = ["testing"]
 "#;
 const DEFAULT_SKILL: &[u8] = b"description: Project testing guidance\n\nRun the relevant formatter, checker, and tests after changes.\n";
+const CODER_AGENT: &str = r#"description = "Агент для разработки и изменения кода"
+system_prompt = "Ты coding-agent. Сначала сформулируй план, вноси минимальные изменения, показывай результат и запускай релевантные проверки. Не обращайся к почте или календарю без явного запроса."
+enabled_tools = ["read_file", "list_directory", "search_files", "read_lines", "project_search", "project_symbols", "project_definition", "project_diagnostics", "security_review", "ci_status", "ci_failure_analysis", "apply_patch", "git_status", "git_diff", "git_log"]
+allow_write = true
+confirm_writes = true
+command_allowlist = []
+max_tool_rounds = 20
+skills = ["testing", "coding"]
+"#;
+const ANALYST_AGENT: &str = r#"description = "Агент для анализа проекта, Git и CI"
+system_prompt = "Ты аналитик. Не изменяй файлы. Исследуй источник вопроса, отделяй факты от предположений и давай структурированные выводы со ссылками на файлы."
+enabled_tools = ["read_file", "list_directory", "search_files", "read_lines", "project_search", "project_symbols", "project_definition", "project_diagnostics", "security_review", "ci_status", "ci_failure_analysis", "git_status", "git_diff", "git_log"]
+allow_write = false
+confirm_writes = false
+command_allowlist = []
+max_tool_rounds = 20
+skills = ["analysis"]
+"#;
+const SECRETARY_AGENT: &str = r#"description = "Ассистент для почты и календаря"
+system_prompt = "Ты личный ассистент-секретарь. Работай только с доступными read-only источниками почты и календаря. Уточняй период, часовой пояс и неоднозначные даты. Не изменяй файлы проекта."
+enabled_tools = ["list_recent_emails", "get_email", "search_emails", "list_calendar_events"]
+allow_write = false
+confirm_writes = false
+command_allowlist = []
+max_tool_rounds = 12
+skills = ["email-recap", "calendar-planning"]
+"#;
+const CODING_SKILL: &[u8] = b"description: Safe coding workflow\n\nInspect the relevant files first. Make small patches, preserve existing conventions, and run focused tests plus formatter/checker after changes.\n";
+const ANALYSIS_SKILL: &[u8] = b"description: Evidence-based analysis\n\nSeparate observations, hypotheses, risks, and recommendations. Reference concrete files, symbols, commands, or test results. Do not edit files.\n";
+const EMAIL_RECAP_SKILL: &[u8] = b"description: Safe email recap\n\nRead only the messages needed for the request. Summarize sender, subject, date, action items, and unanswered questions. Never expose tokens or persist external message content unnecessarily.\n";
+const CALENDAR_SKILL: &[u8] = b"description: Calendar planning\n\nUse explicit RFC3339 ranges when querying events. For natural-language dates, state the interpreted period and timezone. Summarize events with date, time, title, calendar, and location.\n";
 const DEFAULT_SCHEDULE: &[u8] = br#"# Copy to schedules.toml and add enabled jobs.
 [[jobs]]
 name = "tests"
