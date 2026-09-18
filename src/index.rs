@@ -51,7 +51,7 @@ pub struct SearchHit {
 
 impl ProjectIndex {
     pub fn index_path(root: impl AsRef<Path>) -> PathBuf {
-        root.as_ref().join(".agent").join("index.json")
+        root.as_ref().join(".aiagent").join("index.json")
     }
 
     pub fn build(root: impl AsRef<Path>) -> io::Result<Self> {
@@ -224,7 +224,10 @@ fn language_for(path: &Path) -> String {
 }
 
 fn is_excluded_directory(name: &str) -> bool {
-    matches!(name, ".git" | "target" | "node_modules" | ".agent")
+    matches!(
+        name,
+        ".git" | "target" | "node_modules" | ".agent" | ".aiagent"
+    )
 }
 
 fn is_excluded_file(path: &Path) -> bool {

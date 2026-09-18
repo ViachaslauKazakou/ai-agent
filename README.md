@@ -9,7 +9,7 @@
 
 - LiteLLM и Ollama через `/chat/completions`;
 - одноразовый prompt и интерактивный REPL;
-- сохранение истории в `<working-dir>/.agent-session.json`;
+- сохранение истории в `<working-dir>/.aiagent/session.json`;
 - tools `read_file`, `list_directory`, `write_file`, `search_files`,
   `read_lines`, `project_search`, read-only email tools
   `list_recent_emails`, `get_email`, `search_emails` и опциональный `run_command`;
@@ -25,18 +25,18 @@
 - ограничение agent loop через `max_tool_rounds`;
 - coding-agent workflow с планом, малыми patch, проверками и итоговым summary;
 - лимиты loop по времени (`max_loop_seconds`) и размеру diff (`max_diff_bytes`);
-- автоматический выбор доступной Ollama-модели вместо `demo-model` с сохранением выбора в `config.json`;
+- автоматический выбор доступной Ollama-модели вместо `demo-model` с сохранением выбора в `.aiagent/config.json`;
 - переключение tools во время REPL командами `/tools on` и `/tools off`;
 - project-local агенты в `.aiagent/agents/*.toml`;
 - project-local skills в `.aiagent/skills/<name>/SKILL.md`;
-- инкрементальный JSON-индекс проекта в `.agent/index.json`;
+- инкрементальный JSON-индекс проекта в `.aiagent/index.json`;
 - P1 project intelligence tools: `project_symbols`, `project_definition`, `project_diagnostics`;
 - P1 `security_review` для типовых security и quality findings;
-- отдельная project memory в `.agent/project-memory.json`, иерархические `AGENTS.md` и `/compact`;
+- отдельная project memory в `.aiagent/project-memory.json`, иерархические `AGENTS.md` и `/compact`;
 - provider-neutral CI MVP: `ci_status` и `ci_failure_analysis` для GitHub Actions/GitLab CI/Jenkins;
 - unit-, integration- и HTTP-клиентские тесты.
 - REPL с history, навигацией стрелками, Home/End, Ctrl-R и многострочным вводом через `\\`.
-- `/model` без аргумента открывает интерактивный picker доступных моделей с выбором стрелками и Enter; выбранная модель сохраняется в `config.json`.
+- `/model` без аргумента открывает интерактивный picker доступных моделей с выбором стрелками и Enter; выбранная модель сохраняется в `.aiagent/config.json`.
 
 ## Установка и инициализация проекта
 
@@ -49,18 +49,18 @@ ai-agent --init
 # или просто ai-agent — инициализация выполняется автоматически
 ```
 
-При первом запуске создаются `config.json`, `.aiagent/agents/default.toml`,
-`.aiagent/skills/testing/SKILL.md` и `.aiagent/checkpoints/`. `config.json`
+При первом запуске создаются `.aiagent/config.json`, `.aiagent/agents/default.toml`,
+`.aiagent/skills/testing/SKILL.md` и `.aiagent/checkpoints/`. `.aiagent/config.json`
 создаётся из `.env`, затем `.env.example`, а если этих файлов нет — из встроенного
 безопасного шаблона. Существующие файлы не перезаписываются.
 
 После создания JSON является основным источником runtime-настроек; CLI-параметры
 имеют наивысший приоритет. Секреты не выводятся в логах и `--verbose`, а
-`config.json` исключён из Git через `.gitignore`.
+`.aiagent/config.json` исключён из Git через `.gitignore`.
 
-Если в `config.json` оставлена модель `demo-model`, при запуске Ollama агент
+Если в `.aiagent/config.json` оставлена модель `demo-model`, при запуске Ollama агент
 получает список `/models`, выбирает доступную модель с приоритетом `coder`,
-`qwen` или `llama`, а затем сохраняет её в `config.json`. Явная модель из CLI
+`qwen` или `llama`, а затем сохраняет её в `.aiagent/config.json`. Явная модель из CLI
 (`--model`) имеет приоритет и автоматически не заменяется.
 
 ## Работа с почтой
@@ -90,7 +90,7 @@ enabled_tools = [
 
 Почтовые инструменты не изменяют и не удаляют письма. Результаты чтения помечены
 как ephemeral: они доступны текущему запросу LLM, но не сохраняются в
-`.agent-session.json`.
+`.aiagent/session.json`.
 
 ### Gmail: настройка аккаунта
 
@@ -144,7 +144,7 @@ cargo run -- --graph-login
 
 Device-code flow выведет URL и код в терминал. Refresh token сохраняется только в
 системном хранилище учётных данных под сервисом
-`ai-agent.microsoft-graph`; в `.env`, `.agent-session.json` и логах он не
+`ai-agent.microsoft-graph`; в `.env`, `.aiagent/session.json` и логах он не
 записывается. Для CI/mock HTTP допускается временный
 `MICROSOFT_GRAPH_ACCESS_TOKEN`, но для обычной работы предпочтителен
 `--graph-login`.
@@ -524,10 +524,10 @@ Skills являются инструкциями для system prompt: они н
 
 ### Индекс проекта
 
-Команда `/index` создаёт или обновляет `.agent/index.json`. Индекс хранит
+Команда `/index` создаёт или обновляет `.aiagent/index.json`. Индекс хранит
 текстовые chunks и используется tool `project_search`; embeddings и внешняя
 база данных не требуются. Исключаются `.git`, `target`, `node_modules`, `.agent`,
-`.agent-session.json`, бинарные и слишком большие файлы.
+`.aiagent/session.json`, бинарные и слишком большие файлы.
 
 ## Структура
 
@@ -603,7 +603,7 @@ cargo fmt -- --check \
 Реализовано в PR с сабтаском [#20](https://github.com/ViachaslauKazakou/ai-agent/issues/20):
 
 - отдельная модель project memory с summary, preferences и decisions;
-- атомарное хранение в `.agent/project-memory.json`;
+- атомарное хранение в `.aiagent/project-memory.json`;
 - иерархические `AGENTS.md` и команда `/compact` для сжатия session history.
 
 ### GitHub/GitLab и CI/CD

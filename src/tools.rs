@@ -150,7 +150,7 @@ fn checkpoint(path: &Path, content: &[u8]) -> Result<PathBuf, AppError> {
         .ancestors()
         .find(|candidate| candidate.join(".git").exists())
         .ok_or_else(|| AppError::UnsafeEdit("Git-репозиторий не найден".to_owned()))?;
-    let dir = root.join(".agent").join("checkpoints");
+    let dir = root.join(".aiagent").join("checkpoints");
     fs::create_dir_all(&dir).map_err(|error| AppError::Tool(error.to_string()))?;
     let backup = dir.join(format!(
         "{}-{}.bak",
@@ -916,7 +916,7 @@ impl Tool for RollbackLastChange {
         let root = find_git_root(&context.working_dir)
             .ok_or_else(|| AppError::UnsafeEdit("Git-репозиторий не найден".to_owned()))?;
         let value: Value = serde_json::from_str(
-            &fs::read_to_string(root.join(".agent/checkpoints/latest.json"))
+            &fs::read_to_string(root.join(".aiagent/checkpoints/latest.json"))
                 .map_err(|error| AppError::Tool(error.to_string()))?,
         )
         .map_err(|error| AppError::Tool(error.to_string()))?;

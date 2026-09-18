@@ -16,6 +16,7 @@ const DEFAULT_MAX_TOOL_ROUNDS: usize = 20;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_LOG_LEVEL: &str = "info";
 const JSON_CONFIG_FILE: &str = "config.json";
+pub const PROJECT_CONFIG_PATH: &str = ".aiagent/config.json";
 
 #[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -135,8 +136,9 @@ impl Config {
     /// Загружает проектные `.env` и `.agent.toml`, затем применяет CLI.
     pub fn load(cli: &Cli) -> Result<Self, AppError> {
         let project_dir = resolve_project_dir(cli)?;
+        migrate_legacy_project_config(&project_dir)?;
         initialize_project(&project_dir)?;
-        let json_path = project_dir.join(JSON_CONFIG_FILE);
+        let json_path = project_dir.join(PROJECT_CONFIG_PATH);
         let json = load_json_config(&json_path)?;
         let mut environment = env::vars().collect::<HashMap<_, _>>();
         if json.is_none() {
@@ -173,7 +175,7 @@ impl Config {
         let config_path = cli
             .config
             .clone()
-            .unwrap_or_else(|| project_dir.join(JSON_CONFIG_FILE));
+            .unwrap_or_else(|| project_dir.join(PROJECT_CONFIG_PATH));
         let config_path = if config_path.is_absolute() {
             config_path
         } else {
@@ -365,6 +367,10 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
         fs::create_dir_all(project_dir.join(".aiagent").join(directory))
             .map_err(|error| AppError::AgentConfig(error.to_string()))?;
     }
+    write_if_missing(
+        project_dir.join(".aiagent/schedules.toml.example"),
+        DEFAULT_SCHEDULE,
+    )?;
     let agent_path = project_dir.join(".aiagent/agents/default.toml");
     let skill_path = project_dir.join(".aiagent/skills/testing/SKILL.md");
     fs::create_dir_all(agent_path.parent().expect("agent path has parent"))
@@ -373,7 +379,7 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
         .map_err(|error| AppError::AgentConfig(error.to_string()))?;
     write_if_missing(agent_path, DEFAULT_AGENT)?;
     write_if_missing(skill_path, DEFAULT_SKILL)?;
-    let config_path = project_dir.join(JSON_CONFIG_FILE);
+    let config_path = project_dir.join(PROJECT_CONFIG_PATH);
     if config_path.exists() {
         return Ok(false);
     }
@@ -407,8 +413,37 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
     write_if_missing(config_path, &data).map(|_| true)
 }
 
+fn migrate_legacy_project_config(project_dir: &Path) -> Result<(), AppError> {
+    let new_path = project_dir.join(PROJECT_CONFIG_PATH);
+    let old_path = project_dir.join(JSON_CONFIG_FILE);
+    if !new_path.exists() && old_path.is_file() {
+        fs::create_dir_all(new_path.parent().expect("project config has parent"))
+            .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+        fs::copy(old_path, new_path).map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    }
+    let old_agent = project_dir.join(".agent");
+    let new_agent = project_dir.join(".aiagent");
+    let old_checkpoints = old_agent.join("checkpoints");
+    let new_checkpoints = new_agent.join("checkpoints");
+    if old_checkpoints.is_dir() {
+        fs::create_dir_all(&new_checkpoints)
+            .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+        for entry in fs::read_dir(old_checkpoints)
+            .map_err(|error| AppError::AgentConfig(error.to_string()))?
+            .flatten()
+        {
+            let target = new_checkpoints.join(entry.file_name());
+            if !target.exists() {
+                fs::copy(entry.path(), target)
+                    .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn persist_model(project_dir: &Path, model: &str) -> Result<(), AppError> {
-    let path = project_dir.join(JSON_CONFIG_FILE);
+    let path = project_dir.join(PROJECT_CONFIG_PATH);
     let mut config = load_json_config(&path)?.unwrap_or_default();
     config.model = Some(model.to_owned());
     let data = serde_json::to_vec_pretty(&config)
@@ -473,6 +508,13 @@ max_tool_rounds = 20
 skills = ["testing"]
 "#;
 const DEFAULT_SKILL: &[u8] = b"description: Project testing guidance\n\nRun the relevant formatter, checker, and tests after changes.\n";
+const DEFAULT_SCHEDULE: &[u8] = br#"# Copy to schedules.toml and add enabled jobs.
+[[jobs]]
+name = "tests"
+cron = "0 0 * * * *"
+prompt = "Run the project tests and report failures."
+enabled = false
+"#;
 
 fn resolve_project_dir(cli: &Cli) -> Result<PathBuf, AppError> {
     let raw = cli
@@ -759,7 +801,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         assert!(initialize_project(&root).unwrap());
         assert!(!initialize_project(&root).unwrap());
-        assert!(root.join("config.json").is_file());
+        assert!(root.join(".aiagent/config.json").is_file());
         assert!(root.join(".aiagent/agents/default.toml").is_file());
         assert!(root.join(".aiagent/skills/testing/SKILL.md").is_file());
         std::fs::remove_dir_all(root).unwrap();

@@ -688,7 +688,7 @@ impl LlmProvider for ConfiguredProvider {
 }
 
 fn session_path(session: &Session) -> std::path::PathBuf {
-    session.working_dir().join(".agent-session.json")
+    session.working_dir().join(".aiagent/session.json")
 }
 
 fn print_status(session: &Session) {

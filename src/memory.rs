@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const MEMORY_FILE: &str = ".agent/project-memory.json";
+const MEMORY_FILE: &str = ".aiagent/project-memory.json";
 const AGENTS_FILE: &str = "AGENTS.md";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -28,7 +28,7 @@ impl ProjectMemory {
 
     pub fn save(&self, root: impl AsRef<Path>) -> Result<(), String> {
         let root = root.as_ref();
-        fs::create_dir_all(root.join(".agent")).map_err(|error| error.to_string())?;
+        fs::create_dir_all(root.join(".aiagent")).map_err(|error| error.to_string())?;
         let path = root.join(MEMORY_FILE);
         let temporary = path.with_extension("tmp");
         let data = serde_json::to_vec_pretty(self).map_err(|error| error.to_string())?;
