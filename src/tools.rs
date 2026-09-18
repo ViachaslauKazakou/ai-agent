@@ -62,11 +62,17 @@ impl ToolContext {
         let parent = path
             .parent()
             .ok_or_else(|| AppError::Tool("нет родительского каталога".to_owned()))?;
-        let canonical_parent = parent
+        let mut existing = parent;
+        while !existing.exists() {
+            existing = existing
+                .parent()
+                .ok_or_else(|| AppError::Tool("родительский каталог вне working_dir".to_owned()))?;
+        }
+        let canonical_existing = existing
             .canonicalize()
             .map_err(|error| AppError::Tool(error.to_string()))?;
-        ensure_inside(&self.working_dir, &canonical_parent)?;
-        Ok(canonical_parent.join(
+        ensure_inside(&self.working_dir, &canonical_existing)?;
+        Ok(path.parent().unwrap_or(&self.working_dir).join(
             path.file_name()
                 .ok_or_else(|| AppError::Tool("некорректное имя файла".to_owned()))?,
         ))
@@ -960,6 +966,16 @@ mod safety_tests {
         assert!(is_protected_path(Path::new(".env")));
         assert!(is_protected_path(Path::new("client_credentials.json")));
         assert!(!is_protected_path(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn resolves_new_files_when_parent_directories_are_missing() {
+        let root = std::env::temp_dir().join(format!("ai-agent-tools-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let context = ToolContext::new(&root, true);
+        let path = context.resolve_new("src/nested/main.py").unwrap();
+        assert_eq!(path, root.join("src/nested/main.py"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 
