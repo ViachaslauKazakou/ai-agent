@@ -1,9 +1,6 @@
 //! Консольная точка входа учебного AI-агента.
 
-use std::{
-    io::{self, BufRead, Write},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use ai_agent::cli::{Cli, ReplCommand, help_text, parse_repl_command};
 use ai_agent::{
@@ -14,6 +11,7 @@ use ai_agent::{
     tools::{ToolContext, registry_from_names},
 };
 use clap::Parser;
+use rustyline::{DefaultEditor, error::ReadlineError};
 
 #[tokio::main]
 async fn main() {
@@ -235,27 +233,22 @@ async fn run_repl(
         print_status(session);
     }
 
-    let stdin = io::stdin();
-    let mut input = String::new();
-    loop {
-        print!("\x1b[1;36m❯\x1b[0m ");
-        if let Err(error) = io::stdout().flush() {
-            eprintln!("Ошибка вывода приглашения: {error}");
+    let mut editor = match DefaultEditor::new() {
+        Ok(editor) => editor,
+        Err(error) => {
+            eprintln!("Ошибка инициализации line editor: {error}");
             return;
         }
-
-        input.clear();
-        match stdin.lock().read_line(&mut input) {
-            Ok(0) => {
-                println!();
-                return;
-            }
-            Ok(_) => {}
+    };
+    loop {
+        let input = match read_repl_input(&mut editor) {
+            Ok(Some(input)) => input,
+            Ok(None) => return,
             Err(error) => {
                 eprintln!("Ошибка чтения ввода: {error}");
                 return;
             }
-        }
+        };
 
         match parse_repl_command(&input) {
             ReplCommand::Help => println!("{}", help_text()),
@@ -456,6 +449,36 @@ async fn run_repl(
             }
         }
     }
+}
+
+fn read_repl_input(editor: &mut DefaultEditor) -> Result<Option<String>, ReadlineError> {
+    let first = match editor.readline("\x1b[1;36m❯\x1b[0m ") {
+        Ok(line) => line,
+        Err(ReadlineError::Interrupted) => {
+            println!("^C");
+            return Ok(Some(String::new()));
+        }
+        Err(ReadlineError::Eof) => {
+            println!();
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
+    };
+    if first.trim().is_empty() {
+        return Ok(Some(first));
+    }
+    let mut lines = vec![first];
+    while lines.last().is_some_and(|line| line.ends_with('\\')) {
+        if let Some(line) = lines.last_mut() {
+            line.pop();
+        }
+        lines.push(editor.readline("\x1b[2m…\x1b[0m ")?);
+    }
+    let input = lines.join("\n");
+    if !input.trim().is_empty() {
+        let _ = editor.add_history_entry(input.as_str());
+    }
+    Ok(Some(input))
 }
 
 #[allow(clippy::too_many_arguments)]

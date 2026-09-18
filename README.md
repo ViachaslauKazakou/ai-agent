@@ -35,6 +35,7 @@
 - отдельная project memory в `.agent/project-memory.json`, иерархические `AGENTS.md` и `/compact`;
 - provider-neutral CI MVP: `ci_status` и `ci_failure_analysis` для GitHub Actions/GitLab CI/Jenkins;
 - unit-, integration- и HTTP-клиентские тесты.
+- REPL с history, навигацией стрелками, Home/End, Ctrl-R и многострочным вводом через `\\`.
 
 ## Установка и инициализация проекта
 
