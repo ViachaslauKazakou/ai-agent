@@ -25,6 +25,7 @@
 - ограничение agent loop через `max_tool_rounds`;
 - coding-agent workflow с планом, малыми patch, проверками и итоговым summary;
 - лимиты loop по времени (`max_loop_seconds`) и размеру diff (`max_diff_bytes`);
+- автоматический выбор доступной Ollama-модели вместо `demo-model` с сохранением выбора в `config.json`;
 - переключение tools во время REPL командами `/tools on` и `/tools off`;
 - project-local агенты в `.aiagent/agents/*.toml`;
 - project-local skills в `.aiagent/skills/<name>/SKILL.md`;
@@ -54,6 +55,11 @@ ai-agent --init
 После создания JSON является основным источником runtime-настроек; CLI-параметры
 имеют наивысший приоритет. Секреты не выводятся в логах и `--verbose`, а
 `config.json` исключён из Git через `.gitignore`.
+
+Если в `config.json` оставлена модель `demo-model`, при запуске Ollama агент
+получает список `/models`, выбирает доступную модель с приоритетом `coder`,
+`qwen` или `llama`, а затем сохраняет её в `config.json`. Явная модель из CLI
+(`--model`) имеет приоритет и автоматически не заменяется.
 
 ## Работа с почтой
 

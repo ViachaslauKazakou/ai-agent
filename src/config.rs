@@ -192,6 +192,10 @@ impl Config {
         Self::from_sources_with_file(&cli, &environment, file)
     }
 
+    pub fn save_model(&self, model: &str) -> Result<(), AppError> {
+        persist_model(&self.working_dir, model)
+    }
+
     /// Собирает конфигурацию из defaults, переданного окружения и CLI.
     pub fn from_sources(
         cli: &Cli,
@@ -401,6 +405,15 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
     let data = serde_json::to_vec_pretty(&config)
         .map_err(|error| AppError::AgentConfig(error.to_string()))?;
     write_if_missing(config_path, &data).map(|_| true)
+}
+
+pub fn persist_model(project_dir: &Path, model: &str) -> Result<(), AppError> {
+    let path = project_dir.join(JSON_CONFIG_FILE);
+    let mut config = load_json_config(&path)?.unwrap_or_default();
+    config.model = Some(model.to_owned());
+    let data = serde_json::to_vec_pretty(&config)
+        .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    fs::write(path, data).map_err(|error| AppError::AgentConfig(error.to_string()))
 }
 
 fn load_json_config(path: &Path) -> Result<Option<JsonConfig>, AppError> {

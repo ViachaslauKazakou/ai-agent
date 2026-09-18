@@ -82,7 +82,17 @@ async fn main() {
             return;
         }
     };
-    if let Err(error) = session.set_model(&active_profile.model) {
+    let (provider, model) =
+        match select_model(provider, &config, &active_profile, cli.model.is_some()).await {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("Ошибка выбора модели: {error}");
+                return;
+            }
+        };
+    let mut active_profile = active_profile;
+    active_profile.model = model.clone();
+    if let Err(error) = session.set_model(&model) {
         eprintln!("Ошибка модели агента: {error}");
         return;
     }
@@ -125,6 +135,32 @@ async fn main() {
     } else {
         run_repl(&mut session, provider, &config, catalog, active_profile).await;
     }
+}
+
+async fn select_model(
+    provider: ConfiguredProvider,
+    config: &Config,
+    profile: &AgentProfile,
+    explicit: bool,
+) -> Result<(ConfiguredProvider, String), ai_agent::AppError> {
+    if explicit || profile.model != "demo-model" {
+        return Ok((provider, profile.model.clone()));
+    }
+    let models = provider.list_models().await?;
+    let selected = models
+        .iter()
+        .map(|model| model.id.as_str())
+        .find(|id| {
+            let id = id.to_ascii_lowercase();
+            id.contains("coder") || id.contains("qwen") || id.contains("llama")
+        })
+        .or_else(|| models.first().map(|model| model.id.as_str()))
+        .ok_or_else(|| {
+            ai_agent::AppError::LlmResponse("провайдер не вернул доступных моделей".to_owned())
+        })?;
+    config.save_model(selected)?;
+    println!("Автоматически выбрана доступная модель: {selected}");
+    Ok((provider, selected.to_owned()))
 }
 
 async fn run_scheduler(
