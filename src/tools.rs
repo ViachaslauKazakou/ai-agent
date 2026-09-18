@@ -565,12 +565,6 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub fn names(&self) -> Vec<String> {
-        let mut names = self.tools.keys().cloned().collect::<Vec<_>>();
-        names.sort();
-        names
-    }
-
     pub async fn execute(
         &self,
         name: &str,
