@@ -106,6 +106,8 @@ pub enum ReplCommand {
     /// Включить, выключить или показать статистику ответа.
     Stats(Option<String>),
     Compact,
+    CreateAgent(Option<String>),
+    CreateSkill(Option<String>),
     /// Добавить обычный пользовательский prompt.
     Prompt(String),
     /// Пустая строка.
@@ -151,13 +153,19 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
         "/model" => ReplCommand::Model((!argument.is_empty()).then(|| argument.to_owned())),
         "/stats" => ReplCommand::Stats((!argument.is_empty()).then(|| argument.to_owned())),
         "/compact" => ReplCommand::Compact,
+        "/create-agent" => {
+            ReplCommand::CreateAgent((!argument.is_empty()).then(|| argument.to_owned()))
+        }
+        "/create-skill" => {
+            ReplCommand::CreateSkill((!argument.is_empty()).then(|| argument.to_owned()))
+        }
         _ => ReplCommand::Unknown(command.to_owned()),
     }
 }
 
 /// Возвращает текст справки REPL.
 pub fn help_text() -> &'static str {
-    "Команды:\n  /help          показать эту справку\n  /status        показать состояние сессии\n  /tools         показать состояние и доступные tools\n  /tools on|off  включить/выключить tools для текущего запуска\n  /models        показать доступные модели\n  /agents        показать project-local агентов\n  /agent [NAME]  показать или выбрать агента\n  /skills        показать project-local skills\n  /skill NAME    выбрать skill агента\n  /config        показать конфигурацию\n  /permissions   показать permissions\n  /index         построить/обновить индекс проекта\n  /index status  показать состояние индекса\n  /search QUERY  поиск по индексированным фрагментам\n  /model         показать текущую модель\n  /model NAME    изменить имя модели\n  /stats         показать настройки статистики\n  /stats on|off  включить/выключить токены и время\n  /clear         очистить историю\n  /save, /load   сохранить/загрузить историю\n  /exit, /quit   выйти из REPL\n\nКонфигурация агентов и skills хранится в .aiagent/.\nЛюбой другой текст добавляется как сообщение пользователя."
+    "Команды:\n  /help          показать эту справку\n  /status        показать состояние сессии\n  /tools         показать состояние и доступные tools\n  /tools on|off  включить/выключить tools для текущего запуска\n  /models        показать доступные модели\n  /agents        показать project-local агентов\n  /agent [NAME]  показать или выбрать агента\n  /create-agent  создать project-local агента через wizard\n  /skills        показать project-local skills\n  /skill NAME    выбрать skill агента\n  /create-skill  создать project-local skill через wizard\n  /config        показать конфигурацию\n  /permissions   показать permissions\n  /index         построить/обновить индекс проекта\n  /index status  показать состояние индекса\n  /search QUERY  поиск по индексированным фрагментам\n  /model         показать текущую модель\n  /model NAME    изменить имя модели\n  /stats         показать настройки статистики\n  /stats on|off  включить/выключить токены и время\n  /clear         очистить историю\n  /save, /load   сохранить/загрузить историю\n  /exit, /quit   выйти из REPL\n\nКонфигурация агентов и skills хранится в .aiagent/.\nЛюбой другой текст добавляется как сообщение пользователя."
 }
 
 #[cfg(test)]
