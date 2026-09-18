@@ -98,3 +98,8 @@ clippy:
 
 clean:
 	$(CARGO) clean --manifest-path $(MANIFEST)
+
+git:
+	git checkout main
+	git pull origin main
+	git status
