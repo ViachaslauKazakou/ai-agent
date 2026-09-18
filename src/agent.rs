@@ -188,7 +188,13 @@ impl<P: LlmProvider> Agent<P> {
                 {
                     summary.changed_files.push(path.to_owned());
                 }
-                let args: Value = match serde_json::from_str(&call.function.arguments) {
+                let args: Value = match LlmMessage::normalize_tool_arguments(
+                    &call.function.arguments,
+                )
+                .and_then(|arguments| {
+                    serde_json::from_str(&arguments)
+                        .map_err(|error| AppError::LlmJson(error.to_string()))
+                }) {
                     Ok(args) => args,
                     Err(error) => {
                         let content = format!("Некорректные JSON-аргументы: {error}");

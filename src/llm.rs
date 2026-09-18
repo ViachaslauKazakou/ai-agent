@@ -60,6 +60,26 @@ impl LlmMessage {
         Message::new(Role::Assistant, message.content.clone().unwrap_or_default())
     }
 
+    pub fn normalize_tool_arguments(arguments: &str) -> Result<String, AppError> {
+        if serde_json::from_str::<Value>(arguments).is_ok() {
+            return Ok(arguments.to_owned());
+        }
+        let start = arguments.find('{');
+        let end = arguments.rfind('}');
+        if let (Some(start), Some(end)) = (start, end)
+            && start < end
+        {
+            let candidate = &arguments[start..=end];
+            if serde_json::from_str::<Value>(candidate).is_ok() {
+                return Ok(candidate.to_owned());
+            }
+        }
+        Err(AppError::LlmResponse(format!(
+            "tool arguments не являются JSON: {}",
+            arguments.chars().take(160).collect::<String>()
+        )))
+    }
+
     pub(crate) fn tool_result(tool_call_id: &str, content: String) -> Self {
         Self {
             role: "tool".to_owned(),
@@ -409,6 +429,15 @@ fn truncate_for_error(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{CompletionRequest, LiteLlmProvider, ModelInfo};
+
+    #[test]
+    fn normalizes_reasoning_prefix_before_tool_json() {
+        assert_eq!(
+            super::LlmMessage::normalize_tool_arguments("Wait, check tests. {\"limit\":20}")
+                .unwrap(),
+            "{\"limit\":20}"
+        );
+    }
     use crate::{LlmProvider, Message, Role};
     use serde_json::json;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
