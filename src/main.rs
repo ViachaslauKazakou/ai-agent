@@ -58,6 +58,19 @@ async fn main() {
         }
         return;
     }
+    if cli.google_calendar_login {
+        match ai_agent::connectors::gmail_auth::GmailAuth::from_env_with_scope(
+            Duration::from_secs(config.request_timeout_secs),
+            "https://www.googleapis.com/auth/calendar.readonly",
+        ) {
+            Ok(auth) => match auth.login().await {
+                Ok(()) => println!("Google Calendar авторизация завершена."),
+                Err(error) => eprintln!("Ошибка Google Calendar login: {error}"),
+            },
+            Err(error) => eprintln!("Ошибка Google Calendar login: {error}"),
+        }
+        return;
+    }
 
     let mut session = match Session::new(&config.working_dir, &config.model) {
         Ok(session) => session,
@@ -706,6 +719,11 @@ async fn request_completion(
     context.graph_scope = config.microsoft_graph_scope.clone();
     context.gmail_client_id = config.google_gmail_client_id.clone();
     context.gmail_client_secret = config.google_gmail_client_secret.clone();
+    // Keep Calendar credentials separate from Gmail credentials. When the
+    // Calendar client is not configured, the connector must use macOS Calendar
+    // instead of attempting a Google OAuth flow.
+    context.google_calendar_client_id = config.google_calendar_client_id.clone();
+    context.google_calendar_client_secret = config.google_calendar_client_secret.clone();
     let system_prompt = match catalog.system_prompt(profile) {
         Ok(prompt) => prompt,
         Err(error) => {

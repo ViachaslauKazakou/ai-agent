@@ -16,8 +16,8 @@ use tokio::{
     sync::Mutex,
 };
 
-const SERVICE: &str = "ai-agent.gmail";
-const SCOPE: &str = "https://www.googleapis.com/auth/gmail.readonly";
+const GMAIL_SERVICE: &str = "ai-agent.gmail";
+const GMAIL_SCOPE: &str = "https://www.googleapis.com/auth/gmail.readonly";
 const REDIRECT_URI: &str = "http://127.0.0.1:8765/oauth2callback";
 const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
@@ -27,6 +27,8 @@ pub struct GmailAuth {
     client: Client,
     client_id: String,
     client_secret: Option<String>,
+    service: String,
+    scope: String,
     state: Arc<Mutex<TokenState>>,
 }
 
@@ -46,6 +48,18 @@ struct TokenResponse {
 }
 
 impl GmailAuth {
+    pub fn from_env_with_scope(
+        timeout: Duration,
+        scope: impl Into<String>,
+    ) -> Result<Self, AppError> {
+        let client_id = std::env::var("GOOGLE_GMAIL_CLIENT_ID")
+            .map_err(|_| AppError::InvalidConfig("GOOGLE_GMAIL_CLIENT_ID не задан".into()))?;
+        let client_secret = std::env::var("GOOGLE_GMAIL_CLIENT_SECRET")
+            .ok()
+            .filter(|secret| !secret.trim().is_empty());
+        Self::from_config_with_scope(timeout, client_id, client_secret, GMAIL_SERVICE, scope)
+    }
+
     pub fn from_env(timeout: Duration) -> Result<Self, AppError> {
         let client_id = std::env::var("GOOGLE_GMAIL_CLIENT_ID")
             .map_err(|_| AppError::InvalidConfig("GOOGLE_GMAIL_CLIENT_ID не задан".into()))?;
@@ -60,6 +74,8 @@ impl GmailAuth {
             client,
             client_id,
             client_secret,
+            service: GMAIL_SERVICE.to_owned(),
+            scope: GMAIL_SCOPE.to_owned(),
             state: Arc::new(Mutex::new(TokenState::default())),
         })
     }
@@ -77,12 +93,14 @@ impl GmailAuth {
             client,
             client_id,
             client_secret,
+            service: GMAIL_SERVICE.to_owned(),
+            scope: GMAIL_SCOPE.to_owned(),
             state: Arc::new(Mutex::new(TokenState::default())),
         })
     }
 
     fn entry(&self) -> Result<Entry, AppError> {
-        Entry::new(SERVICE, &self.client_id)
+        Entry::new(&self.service, &self.client_id)
             .map_err(|e| AppError::Tool(format!("OS credential store: {e}")))
     }
 
@@ -101,11 +119,11 @@ impl GmailAuth {
             "{AUTH_ENDPOINT}?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent&code_challenge={}&code_challenge_method=S256&state={}",
             urlencoding::encode(&self.client_id),
             urlencoding::encode(REDIRECT_URI),
-            urlencoding::encode(SCOPE),
+            urlencoding::encode(&self.scope),
             challenge,
             urlencoding::encode(&state)
         );
-        println!("Откройте в браузере для Gmail авторизации:\n{url}");
+        println!("Откройте в браузере для авторизации:\n{url}");
         let (mut socket, _) = listener
             .accept()
             .await
@@ -121,7 +139,7 @@ impl GmailAuth {
             .nth(1)
             .ok_or_else(|| AppError::Tool("Gmail callback: некорректный HTTP request".into()))?;
         let params = parse_query(target.split('?').nth(1).unwrap_or_default());
-        let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\nGmail authorization completed. You can close this tab.";
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\nAuthorization completed. You can close this tab.";
         let _ = socket.write_all(response).await;
         if params.get("state") != Some(&state) {
             return Err(AppError::Tool("Gmail OAuth state mismatch".into()));
@@ -244,6 +262,21 @@ impl GmailAuth {
         self.set_access(access.clone(), token.expires_in.unwrap_or(3600))
             .await;
         Ok(access)
+    }
+}
+
+impl GmailAuth {
+    pub fn from_config_with_scope(
+        timeout: Duration,
+        client_id: String,
+        client_secret: Option<String>,
+        service: impl Into<String>,
+        scope: impl Into<String>,
+    ) -> Result<Self, AppError> {
+        let mut auth = Self::from_config(timeout, client_id, client_secret)?;
+        auth.service = service.into();
+        auth.scope = scope.into();
+        Ok(auth)
     }
 }
 

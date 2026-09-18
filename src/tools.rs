@@ -31,6 +31,8 @@ pub struct ToolContext {
     pub graph_access_token: Option<String>,
     pub gmail_client_id: Option<String>,
     pub gmail_client_secret: Option<String>,
+    pub google_calendar_client_id: Option<String>,
+    pub google_calendar_client_secret: Option<String>,
     pub graph_client_id: Option<String>,
     pub graph_tenant: Option<String>,
     pub graph_scope: Option<String>,
@@ -50,6 +52,8 @@ impl ToolContext {
             graph_access_token: None,
             gmail_client_id: None,
             gmail_client_secret: None,
+            google_calendar_client_id: None,
+            google_calendar_client_secret: None,
             graph_client_id: None,
             graph_tenant: None,
             graph_scope: None,
@@ -1316,6 +1320,7 @@ pub fn default_registry() -> Result<ToolRegistry, AppError> {
     registry.register(crate::connectors::tools::ListRecentEmails)?;
     registry.register(crate::connectors::tools::GetEmail)?;
     registry.register(crate::connectors::tools::SearchEmails)?;
+    registry.register(crate::connectors::tools::ListCalendarEvents)?;
     Ok(registry)
 }
 
@@ -1358,6 +1363,9 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
             }
             "get_email" => registry.register(crate::connectors::tools::GetEmail)?,
             "search_emails" => registry.register(crate::connectors::tools::SearchEmails)?,
+            "list_calendar_events" => {
+                registry.register(crate::connectors::tools::ListCalendarEvents)?
+            }
             "run_command" => registry.register(RunCommand)?,
             unknown => return Err(AppError::UnknownTool(unknown.to_owned())),
         }

@@ -264,13 +264,10 @@ impl<P: LlmProvider> Agent<P> {
                 });
             };
 
-            if let Ok(message) = LlmMessage::from_tool_response(&response.message)
-                && (message.role() != Role::Assistant
-                    || message.tool_calls().is_some()
-                    || !message.content().trim().is_empty())
-            {
-                session.add_message(message);
-            }
+            // Keep persistent history structurally valid. Ephemeral tools (mail
+            // and calendar) must not leave an assistant tool call without its
+            // matching tool output in the next request.
+            let mut persisted_tool_results = Vec::new();
 
             for call in tool_calls {
                 summary.tool_calls += 1;
@@ -291,7 +288,9 @@ impl<P: LlmProvider> Agent<P> {
                     Ok(args) => args,
                     Err(error) => {
                         let content = format!("Некорректные JSON-аргументы: {error}");
-                        self.push_tool_result(session, &call.id, content.clone(), true);
+                        self.messages
+                            .push(LlmMessage::tool_result(&call.id, content.clone()));
+                        persisted_tool_results.push((call.id.clone(), content));
                         continue;
                     }
                 };
@@ -328,26 +327,28 @@ impl<P: LlmProvider> Agent<P> {
                         (error.to_string(), true)
                     }
                 };
-                self.push_tool_result(session, &call.id, content, persist);
+                self.messages
+                    .push(LlmMessage::tool_result(&call.id, content.clone()));
+                if persist {
+                    persisted_tool_results.push((call.id.clone(), content));
+                }
+            }
+
+            if !persisted_tool_results.is_empty()
+                && let Ok(message) = LlmMessage::from_tool_response(&response.message)
+            {
+                session.add_message(message);
+                for (id, content) in persisted_tool_results {
+                    if let Ok(message) = Message::tool_result(id, content) {
+                        session.add_message(message);
+                    }
+                }
             }
         }
 
         Err(AppError::ToolRoundLimit(self.max_tool_rounds))
     }
 
-    fn push_tool_result(
-        &mut self,
-        session: &mut Session,
-        id: &str,
-        content: String,
-        persist: bool,
-    ) {
-        self.messages
-            .push(LlmMessage::tool_result(id, content.clone()));
-        if persist && let Ok(message) = Message::tool_result(id, content) {
-            session.add_message(message);
-        }
-    }
 }
 
 fn is_provider_tool_parse_error(error: &AppError) -> bool {

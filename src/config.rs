@@ -41,6 +41,8 @@ struct JsonConfig {
     microsoft_graph_scope: Option<String>,
     google_gmail_client_id: Option<String>,
     google_gmail_client_secret: Option<String>,
+    google_calendar_client_id: Option<String>,
+    google_calendar_client_secret: Option<String>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -95,6 +97,8 @@ pub struct Config {
     pub microsoft_graph_scope: Option<String>,
     pub google_gmail_client_id: Option<String>,
     pub google_gmail_client_secret: Option<String>,
+    pub google_calendar_client_id: Option<String>,
+    pub google_calendar_client_secret: Option<String>,
 }
 
 impl fmt::Debug for Config {
@@ -143,6 +147,8 @@ impl Config {
             "microsoft_graph_scope": self.microsoft_graph_scope,
             "google_gmail_client_id": self.google_gmail_client_id,
             "google_gmail_client_secret": self.google_gmail_client_secret.as_ref().map(|_| "<redacted>"),
+            "google_calendar_client_id": self.google_calendar_client_id,
+            "google_calendar_client_secret": self.google_calendar_client_secret.as_ref().map(|_| "<redacted>"),
         });
 
         serde_json::to_string_pretty(&value).expect("configuration JSON should be serializable")
@@ -209,6 +215,16 @@ impl Config {
                 &mut environment,
                 "GOOGLE_GMAIL_CLIENT_SECRET",
                 config.google_gmail_client_secret.clone(),
+            );
+            set_if_some(
+                &mut environment,
+                "GOOGLE_CALENDAR_CLIENT_ID",
+                config.google_calendar_client_id.clone(),
+            );
+            set_if_some(
+                &mut environment,
+                "GOOGLE_CALENDAR_CLIENT_SECRET",
+                config.google_calendar_client_secret.clone(),
             );
         }
 
@@ -362,6 +378,9 @@ impl Config {
         let microsoft_graph_scope = environment.get("MICROSOFT_GRAPH_SCOPE").cloned();
         let google_gmail_client_id = environment.get("GOOGLE_GMAIL_CLIENT_ID").cloned();
         let google_gmail_client_secret = environment.get("GOOGLE_GMAIL_CLIENT_SECRET").cloned();
+        let google_calendar_client_id = environment.get("GOOGLE_CALENDAR_CLIENT_ID").cloned();
+        let google_calendar_client_secret =
+            environment.get("GOOGLE_CALENDAR_CLIENT_SECRET").cloned();
         let mut enabled_tools = enabled_tools;
         if (google_gmail_client_id.is_some() || microsoft_graph_client_id.is_some())
             && !enabled_tools
@@ -373,6 +392,14 @@ impl Config {
                 "get_email".to_owned(),
                 "search_emails".to_owned(),
             ]);
+        }
+        if google_calendar_client_id.is_some() || cfg!(target_os = "macos") {
+            if !enabled_tools
+                .iter()
+                .any(|tool| tool == "list_calendar_events")
+            {
+                enabled_tools.push("list_calendar_events".to_owned());
+            }
         }
         if max_loop_seconds == 0 || max_diff_bytes == 0 {
             return Err(AppError::InvalidConfig(
@@ -402,6 +429,8 @@ impl Config {
             microsoft_graph_scope,
             google_gmail_client_id,
             google_gmail_client_secret,
+            google_calendar_client_id,
+            google_calendar_client_secret,
         })
     }
 }
@@ -468,6 +497,14 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
             .get("REQUEST_TIMEOUT_SECS")
             .and_then(|v| v.parse().ok()),
         log_level: values.get("RUST_LOG").cloned(),
+        google_calendar_client_id: values
+            .get("GOOGLE_CALENDAR_CLIENT_ID")
+            .cloned()
+            .filter(|value| !value.trim().is_empty()),
+        google_calendar_client_secret: values
+            .get("GOOGLE_CALENDAR_CLIENT_SECRET")
+            .cloned()
+            .filter(|value| !value.trim().is_empty()),
         ..Default::default()
     };
     if config.google_gmail_client_id.is_some() || config.microsoft_graph_client_id.is_some() {
@@ -664,6 +701,7 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
                 | "list_recent_emails"
                 | "get_email"
                 | "search_emails"
+                | "list_calendar_events"
         ) {
             return Err(AppError::UnknownTool(tool.clone()));
         }
