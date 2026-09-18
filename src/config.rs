@@ -520,6 +520,7 @@ fn resolve_project_dir(cli: &Cli) -> Result<PathBuf, AppError> {
     let raw = cli
         .project_dir
         .clone()
+        .or_else(|| cli.working_dir.clone())
         .or_else(|| env::var_os("AI_AGENT_PROJECT_DIR").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("."));
     absolute_existing_directory(&raw.to_string_lossy())

@@ -99,7 +99,9 @@ impl<P: LlmProvider> Agent<P> {
             if let Some(prompt) = &self.system_prompt {
                 let prompt = if self.workflow_prompt {
                     format!(
-                        "{prompt}\n\nCoding workflow: analyze -> state a short plan -> apply small patches -> review diff -> run relevant tests/checkers -> fix failures -> report changed files, checks, and remaining issues. For a new file use create_file; it creates missing parent directories automatically (for example src/main.py creates src/). write_file also creates parent directories; do not first call list_directory to decide whether a requested new directory exists. apply_patch only edits an existing file. Never claim file or directory creation is impossible when create_file or write_file is available. Stop and ask for clarification before ambiguous or dangerous actions."
+                        "{prompt}\n\nCoding workflow: analyze -> state a short plan -> apply small patches -> review diff -> run relevant tests/checkers -> fix failures -> report changed files, checks, and remaining issues. Effective permissions: allow_write={}, enabled_tools={}. For a new file use create_file; it creates missing parent directories automatically (for example src/main.py creates src/). write_file also creates parent directories; do not first call list_directory to decide whether a requested new directory exists. apply_patch only edits an existing file. Never claim file or directory creation is impossible when create_file or write_file is available. Stop and ask for clarification before ambiguous or dangerous actions.",
+                        self.context.allow_write,
+                        self.registry.names().join(", ")
                     )
                 } else {
                     prompt.clone()
