@@ -729,10 +729,14 @@ async fn request_completion(
     println!("\x1b[2m└─ Ответ\x1b[0m\n");
     match agent.complete(session, prompt).await {
         Ok(response) => {
+            let summary = if is_coding_request(prompt) {
+                response.summary.render()
+            } else {
+                String::new()
+            };
             println!(
                 "\x1b[1;32m◆ Assistant\x1b[0m\n{}{}",
-                response.content,
-                response.summary.render()
+                response.content, summary
             );
             if show_stats {
                 print_response_stats(response.usage.as_ref(), started.elapsed().as_secs_f64());
@@ -742,6 +746,42 @@ async fn request_completion(
             }
         }
         Err(error) => eprintln!("Ошибка агента: {error}"),
+    }
+}
+
+fn is_coding_request(prompt: &str) -> bool {
+    let text = prompt.to_ascii_lowercase();
+    [
+        "исправь",
+        "проверь код",
+        "создай файл",
+        "создай проект",
+        "удали файл",
+        "измени",
+        "реализуй",
+        "refactor",
+        "fix",
+        "debug",
+        "create file",
+        "write code",
+        "implement",
+        "code review",
+        "security review",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::is_coding_request;
+
+    #[test]
+    fn only_coding_requests_get_summary() {
+        assert!(is_coding_request("исправь ошибку в src/main.py"));
+        assert!(is_coding_request("create file src/app.py"));
+        assert!(!is_coding_request("проверь почту за сегодня"));
+        assert!(!is_coding_request("какая погода?"));
     }
 }
 
