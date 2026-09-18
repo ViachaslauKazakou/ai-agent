@@ -99,7 +99,7 @@ impl<P: LlmProvider> Agent<P> {
             if let Some(prompt) = &self.system_prompt {
                 let prompt = if self.workflow_prompt {
                     format!(
-                        "{prompt}\n\nCoding workflow: analyze -> state a short plan -> apply small patches -> review diff -> run relevant tests/checkers -> fix failures -> report changed files, checks, and remaining issues. For a new file use write_file or create_file; apply_patch only edits an existing file. Never claim file creation is impossible when write_file or create_file is available. Stop and ask for clarification before ambiguous or dangerous actions."
+                        "{prompt}\n\nCoding workflow: analyze -> state a short plan -> apply small patches -> review diff -> run relevant tests/checkers -> fix failures -> report changed files, checks, and remaining issues. For a new file or directory use create_file: it creates missing parent directories automatically (for example src/main.py creates src/). write_file also creates parent directories; apply_patch only edits an existing file. Never claim file or directory creation is impossible when create_file or write_file is available. Stop and ask for clarification before ambiguous or dangerous actions."
                     )
                 } else {
                     prompt.clone()
