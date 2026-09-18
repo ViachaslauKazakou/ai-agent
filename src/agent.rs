@@ -164,6 +164,7 @@ impl<P: LlmProvider> Agent<P> {
         let mut has_usage = false;
         let mut summary = LoopSummary::default();
         let mut empty_response_retries = 0;
+        let mut tool_parse_retries = 0;
         for round in 0..self.max_tool_rounds {
             if let Some(limit) = self.max_elapsed
                 && started.elapsed() > limit
@@ -179,7 +180,20 @@ impl<P: LlmProvider> Agent<P> {
                     Vec::new()
                 },
             );
-            let response = self.provider.complete(request).await?;
+            let response = match self.provider.complete(request).await {
+                Ok(response) => response,
+                Err(error) if is_provider_tool_parse_error(&error) && tool_parse_retries < 2 => {
+                    tool_parse_retries += 1;
+                    self.messages.push(LlmMessage {
+                        role: "user".to_owned(),
+                        content: Some("Предыдущий tool call был повреждён и не распарсился. Повтори вызов, вернув только полный JSON в arguments без reasoning, пояснений или обрезанного JSON. Если tools не нужны, верни обычный текстовый ответ.".to_owned()),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             if let Some(response_usage) = &response.usage {
                 usage.add_assign(response_usage);
                 has_usage = true;
@@ -306,6 +320,33 @@ impl<P: LlmProvider> Agent<P> {
         if persist && let Ok(message) = Message::tool_result(id, content) {
             session.add_message(message);
         }
+    }
+}
+
+fn is_provider_tool_parse_error(error: &AppError) -> bool {
+    matches!(
+        error,
+        AppError::LlmHttp { status: 500, message }
+            if message.to_ascii_lowercase().contains("error parsing tool call")
+                || message.to_ascii_lowercase().contains("unexpected end of json")
+    )
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::is_provider_tool_parse_error;
+    use crate::AppError;
+
+    #[test]
+    fn detects_truncated_provider_tool_calls() {
+        assert!(is_provider_tool_parse_error(&AppError::LlmHttp {
+            status: 500,
+            message: "error parsing tool call: unexpected end of JSON input".to_owned(),
+        }));
+        assert!(!is_provider_tool_parse_error(&AppError::LlmHttp {
+            status: 400,
+            message: "error parsing tool call".to_owned(),
+        }));
     }
 }
 
