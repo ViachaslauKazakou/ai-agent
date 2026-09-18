@@ -11,6 +11,7 @@ use ai_agent::{
     tools::{ToolContext, registry_from_names},
 };
 use clap::Parser;
+use dialoguer::Select;
 use rustyline::{DefaultEditor, error::ReadlineError};
 
 #[tokio::main]
@@ -73,6 +74,10 @@ async fn main() {
         .profile("default")
         .expect("default profile exists")
         .clone();
+    let mut active_profile = active_profile;
+    // config.json is the source of truth for the model. A legacy profile may
+    // still contain the old generated demo-model value.
+    active_profile.model = cli.model.clone().unwrap_or_else(|| config.model.clone());
     let provider = match ConfiguredProvider::new(&config, &active_profile) {
         Ok(provider) => provider,
         Err(error) => {
@@ -88,8 +93,12 @@ async fn main() {
                 return;
             }
         };
-    let mut active_profile = active_profile;
     active_profile.model = model.clone();
+    if cli.model.is_some()
+        && let Err(error) = config.save_model(&model)
+    {
+        eprintln!("Предупреждение: модель не сохранена в config.json: {error}");
+    }
     if let Err(error) = session.set_model(&model) {
         eprintln!("Ошибка модели агента: {error}");
         return;
@@ -139,9 +148,9 @@ async fn select_model(
     provider: ConfiguredProvider,
     config: &Config,
     profile: &AgentProfile,
-    explicit: bool,
+    _explicit: bool,
 ) -> Result<(ConfiguredProvider, String), ai_agent::AppError> {
-    if explicit || profile.model != "demo-model" {
+    if profile.model != "demo-model" {
         return Ok((provider, profile.model.clone()));
     }
     let models = provider.list_models().await?;
@@ -159,6 +168,33 @@ async fn select_model(
     config.save_model(selected)?;
     println!("Автоматически выбрана доступная модель: {selected}");
     Ok((provider, selected.to_owned()))
+}
+
+async fn choose_model(
+    provider: &ConfiguredProvider,
+    current: &str,
+) -> Result<Option<String>, ai_agent::AppError> {
+    let models = provider.list_models().await?;
+    if models.is_empty() {
+        return Err(ai_agent::AppError::LlmResponse(
+            "провайдер не вернул доступных моделей".to_owned(),
+        ));
+    }
+    let labels = models
+        .iter()
+        .map(|model| model.id.clone())
+        .collect::<Vec<_>>();
+    let initial = labels
+        .iter()
+        .position(|model| model == current)
+        .unwrap_or(0);
+    let selection = Select::new()
+        .with_prompt("Выберите модель (↑/↓, Enter)")
+        .items(&labels)
+        .default(initial)
+        .interact_opt()
+        .map_err(|error| ai_agent::AppError::Tool(format!("model picker: {error}")))?;
+    Ok(selection.map(|index| labels[index].clone()))
 }
 
 async fn run_scheduler(
@@ -383,16 +419,34 @@ async fn run_repl(
                     Err(error) => println!("Сначала выполните /index: {error}"),
                 }
             }
-            ReplCommand::Model(Some(model)) => match session.set_model(model) {
-                Ok(()) => println!(
-                    "\x1b[32m✓\x1b[0m Модель изменена: \x1b[1m{}\x1b[0m",
-                    session.model()
-                ),
+            ReplCommand::Model(Some(model)) => match session.set_model(model.clone()) {
+                Ok(()) => {
+                    active_profile.model = model.clone();
+                    if let Err(error) = config.save_model(&model) {
+                        println!("Предупреждение: модель изменена, но не сохранена: {error}");
+                    }
+                    println!(
+                        "\x1b[32m✓\x1b[0m Модель изменена: \x1b[1m{}\x1b[0m",
+                        session.model()
+                    );
+                }
                 Err(error) => println!("Ошибка модели: {error}"),
             },
-            ReplCommand::Model(None) => {
-                println!("Текущая модель: \x1b[1m{}\x1b[0m", session.model())
-            }
+            ReplCommand::Model(None) => match choose_model(&provider, session.model()).await {
+                Ok(Some(model)) => {
+                    if let Err(error) = session.set_model(model.clone()) {
+                        println!("Ошибка модели: {error}");
+                    } else {
+                        active_profile.model = model.clone();
+                        if let Err(error) = config.save_model(&model) {
+                            println!("Предупреждение: модель изменена, но не сохранена: {error}");
+                        }
+                        println!("\x1b[32m✓\x1b[0m Модель изменена: \x1b[1m{}\x1b[0m", model);
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => println!("Ошибка получения моделей: {error}"),
+            },
             ReplCommand::Stats(setting) => match setting.as_deref() {
                 Some("on") => {
                     show_stats = true;
