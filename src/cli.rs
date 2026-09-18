@@ -74,6 +74,10 @@ pub struct Cli {
     /// Выполнить Gmail OAuth login и сохранить refresh token в OS keychain.
     #[arg(long, action = ArgAction::SetTrue)]
     pub gmail_login: bool,
+
+    /// Выполнить Google Calendar OAuth login и сохранить refresh token в OS keychain.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub google_calendar_login: bool,
 }
 
 /// Команда, распознанная внутри REPL.
@@ -206,6 +210,7 @@ mod tests {
                 schedule_file: PathBuf::from(".aiagent/schedules.toml"),
                 graph_login: false,
                 gmail_login: false,
+                google_calendar_login: false,
             }
         );
     }

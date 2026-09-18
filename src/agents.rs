@@ -281,6 +281,7 @@ fn validate_profile(profile: &AgentProfile) -> Result<(), AppError> {
                 | "list_recent_emails"
                 | "get_email"
                 | "search_emails"
+                | "list_calendar_events"
         ) {
             return Err(AppError::UnknownTool(tool.clone()));
         }
