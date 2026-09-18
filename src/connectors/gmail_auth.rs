@@ -64,6 +64,23 @@ impl GmailAuth {
         })
     }
 
+    pub fn from_config(
+        timeout: Duration,
+        client_id: String,
+        client_secret: Option<String>,
+    ) -> Result<Self, AppError> {
+        let client = Client::builder()
+            .timeout(timeout)
+            .build()
+            .map_err(|e| AppError::Tool(e.to_string()))?;
+        Ok(Self {
+            client,
+            client_id,
+            client_secret,
+            state: Arc::new(Mutex::new(TokenState::default())),
+        })
+    }
+
     fn entry(&self) -> Result<Entry, AppError> {
         Entry::new(SERVICE, &self.client_id)
             .map_err(|e| AppError::Tool(format!("OS credential store: {e}")))

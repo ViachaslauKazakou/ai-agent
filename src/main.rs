@@ -698,7 +698,11 @@ async fn request_completion(
     context.interactive = true;
     context.graph_base_url = std::env::var("MICROSOFT_GRAPH_BASE_URL").ok();
     context.graph_access_token = std::env::var("MICROSOFT_GRAPH_ACCESS_TOKEN").ok();
-    context.gmail_client_id = std::env::var("GOOGLE_GMAIL_CLIENT_ID").ok();
+    context.graph_client_id = config.microsoft_graph_client_id.clone();
+    context.graph_tenant = config.microsoft_graph_tenant.clone();
+    context.graph_scope = config.microsoft_graph_scope.clone();
+    context.gmail_client_id = config.google_gmail_client_id.clone();
+    context.gmail_client_secret = config.google_gmail_client_secret.clone();
     let system_prompt = match catalog.system_prompt(profile) {
         Ok(prompt) => prompt,
         Err(error) => {

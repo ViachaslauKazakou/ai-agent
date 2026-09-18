@@ -30,6 +30,10 @@ pub struct ToolContext {
     pub graph_base_url: Option<String>,
     pub graph_access_token: Option<String>,
     pub gmail_client_id: Option<String>,
+    pub gmail_client_secret: Option<String>,
+    pub graph_client_id: Option<String>,
+    pub graph_tenant: Option<String>,
+    pub graph_scope: Option<String>,
 }
 
 impl ToolContext {
@@ -45,6 +49,10 @@ impl ToolContext {
             graph_base_url: None,
             graph_access_token: None,
             gmail_client_id: None,
+            gmail_client_secret: None,
+            graph_client_id: None,
+            graph_tenant: None,
+            graph_scope: None,
         }
     }
 
@@ -1049,7 +1057,10 @@ mod safety_tests {
     fn protects_project_runtime_files_from_delete() {
         let root = Path::new("/tmp/project");
         assert!(is_protected_delete_path(&root.join(".git/config"), root));
-        assert!(is_protected_delete_path(&root.join(".aiagent/config.json"), root));
+        assert!(is_protected_delete_path(
+            &root.join(".aiagent/config.json"),
+            root
+        ));
         assert!(!is_protected_delete_path(&root.join("src/main.py"), root));
     }
 

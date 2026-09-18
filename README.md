@@ -69,7 +69,9 @@ ai-agent --init
 ## Работа с почтой
 
 Агент умеет читать почту в режиме read-only. Поддерживаются Gmail и Outlook через
-Microsoft Graph. В одном запуске выбирается один источник:
+Microsoft Graph. Настройки provider/client ID/tenant/scope сохраняются в
+`.aiagent/config.json`, а секреты и временные токены не выводятся и могут оставаться
+в runtime environment или OS keychain. В одном запуске выбирается один источник:
 
 - если `GOOGLE_GMAIL_CLIENT_ID` непустой, используется Gmail;
 - иначе используется Microsoft Graph.
@@ -101,7 +103,7 @@ enabled_tools = [
    OAuth consent screen.
 2. Создайте OAuth Client ID типа **Desktop app**.
 3. Скопируйте client ID и, если он указан в JSON credentials, client secret в
-   локальный `.env`:
+    локальный runtime environment или `.env`:
 
    ```env
    GOOGLE_GMAIL_CLIENT_ID=...
@@ -130,7 +132,7 @@ enabled_tools = [
 
 1. В Microsoft Entra создайте App registration с public client/device-code flow.
 2. Добавьте delegated permissions `Mail.Read`, `User.Read` и `offline_access`.
-3. Запишите client ID в локальный `.env`:
+3. Запишите client ID в `.aiagent/config.json` или локальный runtime environment:
 
    ```env
    MICROSOFT_GRAPH_CLIENT_ID=...
