@@ -37,7 +37,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -162,7 +162,7 @@ jobs:
 
       - name: 📝 Open Cargo version bump PR
         id: version_bump
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         env:
           NEW_VERSION: ${{ steps.new_version.outputs.version }}
         with:
@@ -220,25 +220,29 @@ jobs:
 
       - name: 🎉 Create GitHub Release
         if: steps.version_bump.outputs.pull-request-number == ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.new_version.outputs.version }}
-          name: 🚀 Release v${{ steps.new_version.outputs.version }}
-          body: |
-            # 🚀 AI Agent v${{ steps.new_version.outputs.version }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.new_version.outputs.version }}
+          RELEASE_TYPE: ${{ steps.release_type.outputs.type }}
+          CURRENT_VERSION: ${{ steps.current_version.outputs.version }}
+          RELEASE_BODY: ${{ steps.changelog.outputs.body }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          cat > release-notes.md <<EOF
+          # 🚀 AI Agent v${NEW_VERSION}
 
-            **Release type:** `${{ steps.release_type.outputs.type }}`
-            **Previous version:** `v${{ steps.current_version.outputs.version }}`
+          **Release type:** \\`${RELEASE_TYPE}\\`
+          **Previous version:** \\`v${CURRENT_VERSION}\\`
 
-            ${{ steps.changelog.outputs.body }}
+          ${RELEASE_BODY}
 
-            ## Installation
+          ## Installation
 
-            Download the `ai-agent-v${{ steps.new_version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz` asset for Linux x86_64.
-          files: ${{ steps.package.outputs.archive }}
-          draft: false
-          prerelease: false
-          token: ${{ secrets.GITHUB_TOKEN }}
+          Download the \\`${ARCHIVE}\\` asset for Linux x86_64.
+          EOF
+          gh release create "v${NEW_VERSION}" "$ARCHIVE" \
+            --title "🚀 Release v${NEW_VERSION}" \
+            --notes-file release-notes.md
 
       - name: 📊 Summary
         if: steps.version_bump.outputs.pull-request-number == ''
