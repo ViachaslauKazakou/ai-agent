@@ -37,6 +37,7 @@
 - unit-, integration- и HTTP-клиентские тесты.
 - REPL с history, навигацией стрелками, Home/End, Ctrl-R и многострочным вводом через `\\`.
 - `/model` без аргумента открывает интерактивный picker доступных моделей с выбором стрелками и Enter; выбранная модель сохраняется в `.aiagent/config.json`.
+- `/create-agent [NAME]` и `/create-skill [NAME]` создают project-local конфигурацию через wizard с preview и подтверждением.
 
 ## Установка и инициализация проекта
 
@@ -438,6 +439,11 @@ ai-agent
 | `security_review` | security и quality scanning |
 | `ci_status` | обнаружение CI-конфигураций |
 | `ci_failure_analysis` | анализ bounded CI-логов |
+
+Команды `/create-agent` и `/create-skill` сохраняют файлы только в `.aiagent/`,
+не перезаписывают существующие сущности и отклоняют небезопасные имена. Wizard
+спрашивает основные параметры, разрешённые tools/skills, permissions и инструкции,
+после чего показывает preview перед записью.
 | `search_files` | поиск текста по файлам |
 | `read_lines` | чтение диапазона строк |
 | `project_search` | поиск по локальному индексу |
