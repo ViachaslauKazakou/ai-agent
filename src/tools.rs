@@ -36,6 +36,10 @@ pub struct ToolContext {
     pub graph_client_id: Option<String>,
     pub graph_tenant: Option<String>,
     pub graph_scope: Option<String>,
+    /// Configurable MCP web-search backend and optional credentials.
+    pub web_search_provider: Option<String>,
+    pub web_search_endpoint: Option<String>,
+    pub web_search_api_key: Option<String>,
 }
 
 impl ToolContext {
@@ -57,6 +61,9 @@ impl ToolContext {
             graph_client_id: None,
             graph_tenant: None,
             graph_scope: None,
+            web_search_provider: None,
+            web_search_endpoint: None,
+            web_search_api_key: None,
         }
     }
 
@@ -1321,6 +1328,8 @@ pub fn default_registry() -> Result<ToolRegistry, AppError> {
     registry.register(crate::connectors::tools::GetEmail)?;
     registry.register(crate::connectors::tools::SearchEmails)?;
     registry.register(crate::connectors::tools::ListCalendarEvents)?;
+    registry.register(crate::mcp::McpTool::file_reader())?;
+    registry.register(crate::mcp::McpTool::web_search())?;
     Ok(registry)
 }
 
@@ -1366,6 +1375,8 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
             "list_calendar_events" => {
                 registry.register(crate::connectors::tools::ListCalendarEvents)?
             }
+            "mcp_read_local_file" => registry.register(crate::mcp::McpTool::file_reader())?,
+            "mcp_web_search" => registry.register(crate::mcp::McpTool::web_search())?,
             "run_command" => registry.register(RunCommand)?,
             unknown => return Err(AppError::UnknownTool(unknown.to_owned())),
         }

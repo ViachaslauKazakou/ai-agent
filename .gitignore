@@ -1,11 +1,6 @@
 .env
 config.json
-.agent/
-.aiagent/config.json
-.aiagent/checkpoints/
-.aiagent/index.json
-.aiagent/project-memory.json
-.aiagent/session.json
+.aiagent/
 .agent-session.json
 .DS_Store
 target/

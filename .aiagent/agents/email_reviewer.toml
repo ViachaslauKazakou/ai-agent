@@ -1,9 +1,0 @@
-description = "Read-only Outlook email reviewer and recap agent"
-provider = "ollama"
-model = "llama3.2"
-enabled_tools = ["list_recent_emails", "get_email", "search_emails"]
-allow_write = false
-confirm_writes = false
-command_allowlist = []
-max_tool_rounds = 8
-skills = ["email-recap"]

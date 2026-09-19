@@ -21,6 +21,12 @@ use rustyline::{DefaultEditor, error::ReadlineError};
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    if cli.mcp_server {
+        if let Err(error) = ai_agent::mcp::run_server().await {
+            eprintln!("MCP server error: {error}");
+        }
+        return;
+    }
     let config = match Config::load(&cli) {
         Ok(config) => config,
         Err(error) => {
@@ -984,6 +990,9 @@ async fn request_completion(
     // instead of attempting a Google OAuth flow.
     context.google_calendar_client_id = config.google_calendar_client_id.clone();
     context.google_calendar_client_secret = config.google_calendar_client_secret.clone();
+    context.web_search_provider = config.web_search_provider.clone();
+    context.web_search_endpoint = config.web_search_endpoint.clone();
+    context.web_search_api_key = config.web_search_api_key.clone();
     let system_prompt = match catalog.system_prompt(profile) {
         Ok(prompt) => prompt,
         Err(error) => {
