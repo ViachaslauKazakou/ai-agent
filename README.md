@@ -199,9 +199,18 @@ ai-agent
 ```
 
 Инструмент `list_recent_emails` принимает период до 720 часов и возвращает
-заголовки с preview. `search_emails` принимает поисковый запрос; для Gmail можно
+заголовки с preview. Для проверки только непрочитанных писем передаётся
+`unread_only=true`; Gmail использует `is:unread`, а Outlook — `isRead eq false`.
+`search_emails` принимает поисковый запрос; для Gmail можно
 использовать Gmail operators, например `from:alice@example.com is:unread`.
-`get_email` загружает тело только для явно выбранного письма.
+`get_email` загружает тело только для явно выбранного письма, поэтому workflow
+для полного содержания выглядит так: `list_recent_emails` или `search_emails` →
+точный `id` → `get_email`. ID нельзя угадывать по теме или отправителю.
+
+Gmail извлекает как `text/plain`, так и HTML-письма: HTML очищается от тегов,
+`script` и `style`, после чего преобразуется в текст. Если письмо использует
+только неподдерживаемое MIME-вложение, `get_email` возвращает диагностическую
+ошибку вместо пустого тела.
 
 Если Google возвращает `client_secret is missing`, добавьте secret из JSON-файла
 OAuth client в локальный `.env`:
@@ -464,6 +473,9 @@ ai-agent
 | `security_review` | security и quality scanning |
 | `ci_status` | обнаружение CI-конфигураций |
 | `ci_failure_analysis` | анализ bounded CI-логов |
+| `list_recent_emails` | заголовки и preview; `unread_only=true` фильтрует непрочитанные |
+| `search_emails` | поиск писем без загрузки тела |
+| `get_email` | загрузка полного тела письма по точному ID |
 
 Команды `/create-agent`, `/create-skill` и `/role create` сохраняют файлы только в `.aiagent/`,
 не перезаписывают существующие сущности и отклоняют небезопасные имена. Wizard
