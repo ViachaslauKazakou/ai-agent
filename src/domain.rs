@@ -37,6 +37,16 @@ pub struct ToolCallMessage {
     pub arguments: String,
 }
 
+/// Краткая запись выполнения tool без аргументов и содержимого результата.
+/// Она помогает восстановить ход сессии и не сохраняет потенциально чувствительные данные.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionEvent {
+    pub kind: String,
+    pub name: String,
+    pub success: bool,
+    pub duration_ms: u64,
+}
+
 impl Message {
     /// Создаёт сообщение, отклоняя пустой или состоящий только из пробелов текст.
     pub fn new(role: Role, content: impl Into<String>) -> Result<Self, AppError> {
@@ -111,6 +121,8 @@ pub struct Session {
     working_dir: PathBuf,
     model: String,
     messages: Vec<Message>,
+    #[serde(default)]
+    events: Vec<SessionEvent>,
 }
 
 impl Session {
@@ -129,6 +141,7 @@ impl Session {
             working_dir: working_dir.into(),
             model,
             messages: Vec::new(),
+            events: Vec::new(),
         })
     }
 
@@ -161,6 +174,21 @@ impl Session {
     /// Возвращает историю сообщений только для чтения.
     pub fn messages(&self) -> &[Message] {
         &self.messages
+    }
+
+    /// Возвращает краткий audit trail вызовов tools без их payload-ов.
+    pub fn events(&self) -> &[SessionEvent] {
+        &self.events
+    }
+
+    /// Сохраняет безопасную метаинформацию о выполнении tool.
+    pub fn record_tool_event(&mut self, name: impl Into<String>, success: bool, duration_ms: u64) {
+        self.events.push(SessionEvent {
+            kind: "tool".to_owned(),
+            name: name.into(),
+            success,
+            duration_ms,
+        });
     }
 
     /// Добавляет сообщение в конец истории и возвращает новую длину истории.

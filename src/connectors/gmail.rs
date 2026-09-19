@@ -100,23 +100,75 @@ fn header(payload: &Payload, name: &str) -> Option<String> {
         .find(|h| h.name.eq_ignore_ascii_case(name))
         .map(|h| h.value.clone())
 }
-fn body_text(part: &BodyPart) -> Option<String> {
-    if part.mime_type.as_deref() == Some("text/plain")
+fn decode_body(data: &str) -> Option<String> {
+    URL_SAFE_NO_PAD
+        .decode(data)
+        .or_else(|_| {
+            let mut padded = data.to_owned();
+            while padded.len() % 4 != 0 {
+                padded.push('=');
+            }
+            URL_SAFE_NO_PAD.decode(padded.trim_end_matches('='))
+        })
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+}
+
+fn body_text(part: &BodyPart, html: bool) -> Option<String> {
+    if part.mime_type.as_deref() == Some(if html { "text/html" } else { "text/plain" })
         && let Some(data) = part.body.as_ref()?.data.as_ref()
     {
-        return URL_SAFE_NO_PAD
-            .decode(data)
-            .or_else(|_| {
-                let mut padded = data.to_owned();
-                while padded.len() % 4 != 0 {
-                    padded.push('=');
-                }
-                URL_SAFE_NO_PAD.decode(padded.trim_end_matches('='))
-            })
-            .ok()
-            .and_then(|bytes| String::from_utf8(bytes).ok());
+        let text = decode_body(data)?;
+        return Some(if html { html_to_text(&text) } else { text });
     }
-    part.parts.as_ref()?.iter().find_map(body_text)
+    part.parts
+        .as_ref()?
+        .iter()
+        .find_map(|child| body_text(child, html))
+}
+
+fn html_to_text(html: &str) -> String {
+    let mut text = html.to_owned();
+    for tag in ["script", "style"] {
+        while let (Some(start), Some(end)) = (
+            text.to_ascii_lowercase().find(&format!("<{tag}")),
+            text.to_ascii_lowercase().find(&format!("</{tag}>")),
+        ) {
+            if end > start {
+                text.replace_range(start..end + tag.len() + 3, " ");
+            } else {
+                break;
+            }
+        }
+    }
+    text = text
+        .replace("<br>", "\n")
+        .replace("<br/>", "\n")
+        .replace("</p>", "\n");
+    let mut output = String::new();
+    let mut inside = false;
+    for ch in text.chars() {
+        match ch {
+            '<' => inside = true,
+            '>' => inside = false,
+            _ if !inside => output.push(ch),
+            _ => {}
+        }
+    }
+    output.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::html_to_text;
+
+    #[test]
+    fn converts_html_body_to_readable_text() {
+        assert_eq!(
+            html_to_text("<p>Hello <b>world</b></p><style>x</style>"),
+            "Hello world"
+        );
+    }
 }
 fn normalize(message: GmailMessage, include_body: bool) -> NormalizedMessage {
     let payload = message.payload.as_ref();
@@ -135,8 +187,20 @@ fn normalize(message: GmailMessage, include_body: bool) -> NormalizedMessage {
                 payload.and_then(|p| {
                     p.body
                         .as_ref()
-                        .and_then(body_text)
-                        .or_else(|| p.parts.as_ref()?.iter().find_map(body_text))
+                        .and_then(|part| body_text(part, false))
+                        .or_else(|| {
+                            p.parts
+                                .as_ref()?
+                                .iter()
+                                .find_map(|part| body_text(part, false))
+                        })
+                        .or_else(|| p.body.as_ref().and_then(|part| body_text(part, true)))
+                        .or_else(|| {
+                            p.parts
+                                .as_ref()?
+                                .iter()
+                                .find_map(|part| body_text(part, true))
+                        })
                 })
             })
             .flatten(),
@@ -157,6 +221,12 @@ impl MessageSource for GmailMailClient {
         query: &MessageQuery,
     ) -> Result<Vec<NormalizedMessage>, AppError> {
         let mut q = query.search.clone().unwrap_or_default();
+        if query.unread_only {
+            if !q.is_empty() {
+                q.push(' ');
+            }
+            q.push_str("is:unread");
+        }
         if query.lookback_hours > 0 {
             if !q.is_empty() {
                 q.push(' ');
@@ -182,14 +252,20 @@ impl MessageSource for GmailMailClient {
         Ok(messages)
     }
     async fn get_message(&self, id: &str) -> Result<NormalizedMessage, AppError> {
-        Ok(normalize(
+        let message = normalize(
             self.get(&format!(
                 "/messages/{}?format=full",
                 urlencoding::encode(id)
             ))
             .await?,
             true,
-        ))
+        );
+        if message.body.is_none() {
+            return Err(AppError::Tool(format!(
+                "Gmail message {id} has no readable inline text body; it may be HTML-only or use an unsupported attachment"
+            )));
+        }
+        Ok(message)
     }
     async fn get_thread(&self, id: &str) -> Result<NormalizedThread, AppError> {
         let thread: ThreadResponse = self

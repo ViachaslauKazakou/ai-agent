@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
+    sync::Mutex,
 };
 
 use async_trait::async_trait;
@@ -40,6 +41,8 @@ pub struct ToolContext {
     pub web_search_provider: Option<String>,
     pub web_search_endpoint: Option<String>,
     pub web_search_api_key: Option<String>,
+    /// Shared UI status used by the REPL while the agent performs a call.
+    pub status: Arc<Mutex<Option<String>>>,
 }
 
 impl ToolContext {
@@ -64,6 +67,14 @@ impl ToolContext {
             web_search_provider: None,
             web_search_endpoint: None,
             web_search_api_key: None,
+            status: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Updates the name of the tool currently being executed, if any.
+    pub fn set_tool_status(&self, tool: Option<&str>) {
+        if let Ok(mut status) = self.status.lock() {
+            *status = tool.map(str::to_owned);
         }
     }
 
