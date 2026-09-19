@@ -365,16 +365,16 @@ async fn run_repl(
             ReplCommand::Agent(Some(name)) => match catalog.profile(&name) {
                 Some(profile) => {
                     active_profile = profile.clone();
-                    if let Err(error) = session.set_model(&active_profile.model) {
-                        println!("Ошибка модели агента: {error}");
-                    } else {
-                        match ConfiguredProvider::new(config, &active_profile) {
-                            Ok(new_provider) => {
-                                provider = new_provider;
-                                println!("Активный агент: {}", active_profile.name);
-                            }
-                            Err(error) => println!("Ошибка provider агента: {error}"),
+                    // Switching an agent changes tools and instructions only.
+                    // The model is session state and may change exclusively via
+                    // the explicit `/model` command.
+                    active_profile.model = session.model().to_owned();
+                    match ConfiguredProvider::new(config, &active_profile) {
+                        Ok(new_provider) => {
+                            provider = new_provider;
+                            println!("Активный агент: {}", active_profile.name);
                         }
+                        Err(error) => println!("Ошибка provider агента: {error}"),
                     }
                 }
                 None => println!("Неизвестный агент: {name}"),
@@ -392,20 +392,19 @@ async fn run_repl(
                 Some(name) => match catalog.profile(&name) {
                     Some(profile) => {
                         active_profile = profile.clone();
-                        if let Err(error) = session.set_model(&active_profile.model) {
-                            println!("Ошибка модели роли: {error}");
-                        } else {
-                            match ConfiguredProvider::new(config, &active_profile) {
-                                Ok(new_provider) => {
-                                    provider = new_provider;
-                                    println!(
-                                        "Активная роль: {}\nTools: {}",
-                                        active_profile.name,
-                                        active_profile.enabled_tools.join(", ")
-                                    );
-                                }
-                                Err(error) => println!("Ошибка provider роли: {error}"),
+                        // Roles are permission/prompt profiles, not model
+                        // selectors. Preserve the current session model.
+                        active_profile.model = session.model().to_owned();
+                        match ConfiguredProvider::new(config, &active_profile) {
+                            Ok(new_provider) => {
+                                provider = new_provider;
+                                println!(
+                                    "Активная роль: {}\nTools: {}",
+                                    active_profile.name,
+                                    active_profile.enabled_tools.join(", ")
+                                );
                             }
+                            Err(error) => println!("Ошибка provider роли: {error}"),
                         }
                     }
                     None => println!("Неизвестная роль: {name}"),
