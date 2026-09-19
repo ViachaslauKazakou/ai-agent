@@ -1,6 +1,6 @@
 .env
 config.json
-.agent/
+.aiagent/
 .aiagent/config.json
 .aiagent/checkpoints/
 .aiagent/index.json
