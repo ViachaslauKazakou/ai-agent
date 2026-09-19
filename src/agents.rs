@@ -286,6 +286,8 @@ fn validate_profile(profile: &AgentProfile) -> Result<(), AppError> {
                 | "get_email"
                 | "search_emails"
                 | "list_calendar_events"
+                | "mcp_read_local_file"
+                | "mcp_web_search"
         ) {
             return Err(AppError::UnknownTool(tool.clone()));
         }

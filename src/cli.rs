@@ -78,6 +78,10 @@ pub struct Cli {
     /// Выполнить Google Calendar OAuth login и сохранить refresh token в OS keychain.
     #[arg(long, action = ArgAction::SetTrue)]
     pub google_calendar_login: bool,
+
+    /// Запустить встроенный MCP server по stdio.
+    #[arg(long, action = ArgAction::SetTrue, hide = true)]
+    pub mcp_server: bool,
 }
 
 /// Команда, распознанная внутри REPL.
@@ -214,6 +218,7 @@ mod tests {
                 graph_login: false,
                 gmail_login: false,
                 google_calendar_login: false,
+                mcp_server: false,
             }
         );
     }

@@ -40,6 +40,8 @@
 - `/model` без аргумента открывает интерактивный picker доступных моделей с выбором стрелками и Enter; выбранная модель сохраняется в `.aiagent/config.json`.
 - После coding-задач агент автоматически выводит структурированный итог: изменённые файлы, проверки и оставшиеся проблемы.
 - read-only calendar tool `list_calendar_events` for Google Calendar and macOS Calendar;
+- встроенные MCP tools `mcp_read_local_file` и `mcp_web_search`;
+- встроенные MCP-style tools `mcp_read_local_file` и `mcp_web_search`;
 - Структурированный `## Итог` показывается только для coding/security задач; mail и обычные информационные запросы получают обычный ответ без блока изменений.
 - Во время ожидания ответа LLM в REPL отображается spinner; статистика показывает фактически использованную модель вместе с токенами и временем.
 - `/create-agent [NAME]` и `/create-skill [NAME]` создают project-local конфигурацию через wizard с preview и подтверждением.
@@ -461,6 +463,54 @@ ai-agent
 | `read_lines` | чтение диапазона строк |
 | `project_search` | поиск по локальному индексу |
 | `run_command` | запуск явно разрешённой команды |
+
+### MCP tools
+
+Встроенные MCP tools используют MCP-over-stdio: агент запускает короткоживущий
+экземпляр бинарника с `--mcp-server`, обменивается с ним newline-delimited
+JSON-RPC и возвращает результат в общий tool loop. Это изолирует MCP protocol
+stream от REPL и позволяет применять те же permissions и лимиты результата,
+что и для встроенных Rust tools.
+
+`mcp_read_local_file` читает файлы только внутри `working_dir`. Поддерживаются
+только `toml`, `yml`, `yaml`, `txt`, `json`, `md`, `doc`, `docx` и `pdf`, размер
+ограничен 5 MB. Для `docx` используется `unzip`, для `pdf` — `pdftotext`, для
+`doc` на macOS — `textutil`; для остальных форматов требуется UTF-8.
+
+`mcp_web_search` поддерживает backend-ы `duckduckgo` и `tavily`. По умолчанию
+используется DuckDuckGo без ключа, а для стабильных структурированных результатов
+рекомендуется Tavily. `open_tabs: true` открывает
+результаты в браузере (`open` на macOS, `xdg-open` на Linux), а `urls` позволяет
+загрузить текст первых трёх страниц. Веб-страницы считаются недоверенным
+контентом и не получают доступа к локальным write tools.
+
+На macOS MCP tools добавляются автоматически. В других системах их можно
+включить в `enabled_tools` профиля вручную. MCP server не должен писать в
+stdout диагностические сообщения: stdout зарезервирован под JSON-RPC.
+
+### MCP tools
+
+Проект содержит минимальный MCP-over-stdio adapter. MCP tools запускают
+изолированный экземпляр текущего бинарника с `--mcp-server`, обмениваются
+JSON-RPC сообщениями через stdin/stdout и затем возвращаются в общий
+`ToolRegistry` наравне со встроенными Rust tools.
+
+`mcp_read_local_file` работает только внутри `working_dir`, ограничивает размер
+файла 5 MB и принимает только разрешённые расширения: `toml`, `yml`, `yaml`,
+`txt`, `json`, `md`, `doc`, `docx`, `pdf`. Для `docx` используется `unzip`, для
+`pdf` — `pdftotext`, для `doc` на macOS — `textutil`; остальные форматы читаются
+как UTF-8.
+
+`mcp_web_search` поддерживает backend-ы `duckduckgo` и `tavily`. Параметр
+`open_tabs: true` открывает найденные URL в браузере (`open` на macOS,
+`xdg-open` на Linux), а параметр `urls` дополнительно загружает текст первых
+трёх страниц. Внешний HTML считается недоверенным контентом и не получает
+доступа к локальным write tools.
+
+На macOS оба MCP tools добавляются в конфигурацию автоматически. В других
+системах их можно явно включить в `enabled_tools` профиля. Backend задаётся
+через `WEB_SEARCH_PROVIDER`, а `WEB_SEARCH_ENDPOINT` и `WEB_SEARCH_API_KEY`
+позволяют настроить Tavily или совместимый endpoint.
 
 Пути проверяются и не могут выйти за пределы `working_dir`. Файлы ограничены
 по размеру, результаты tools могут быть обрезаны. `run_command` не входит в

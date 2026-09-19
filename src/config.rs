@@ -43,6 +43,9 @@ struct JsonConfig {
     google_gmail_client_secret: Option<String>,
     google_calendar_client_id: Option<String>,
     google_calendar_client_secret: Option<String>,
+    web_search_provider: Option<String>,
+    web_search_endpoint: Option<String>,
+    web_search_api_key: Option<String>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -99,6 +102,12 @@ pub struct Config {
     pub google_gmail_client_secret: Option<String>,
     pub google_calendar_client_id: Option<String>,
     pub google_calendar_client_secret: Option<String>,
+    /// Search backend name: `duckduckgo` (default) or `tavily`.
+    pub web_search_provider: Option<String>,
+    /// Optional provider endpoint override.
+    pub web_search_endpoint: Option<String>,
+    /// Optional search API key; never included in debug output.
+    pub web_search_api_key: Option<String>,
 }
 
 impl fmt::Debug for Config {
@@ -149,6 +158,9 @@ impl Config {
             "google_gmail_client_secret": self.google_gmail_client_secret.as_ref().map(|_| "<redacted>"),
             "google_calendar_client_id": self.google_calendar_client_id,
             "google_calendar_client_secret": self.google_calendar_client_secret.as_ref().map(|_| "<redacted>"),
+            "web_search_provider": self.web_search_provider,
+            "web_search_endpoint": self.web_search_endpoint,
+            "web_search_api_key": self.web_search_api_key.as_ref().map(|_| "<redacted>"),
         });
 
         serde_json::to_string_pretty(&value).expect("configuration JSON should be serializable")
@@ -225,6 +237,21 @@ impl Config {
                 &mut environment,
                 "GOOGLE_CALENDAR_CLIENT_SECRET",
                 config.google_calendar_client_secret.clone(),
+            );
+            set_if_some(
+                &mut environment,
+                "WEB_SEARCH_PROVIDER",
+                config.web_search_provider.clone(),
+            );
+            set_if_some(
+                &mut environment,
+                "WEB_SEARCH_ENDPOINT",
+                config.web_search_endpoint.clone(),
+            );
+            set_if_some(
+                &mut environment,
+                "WEB_SEARCH_API_KEY",
+                config.web_search_api_key.clone(),
             );
         }
 
@@ -381,6 +408,9 @@ impl Config {
         let google_calendar_client_id = environment.get("GOOGLE_CALENDAR_CLIENT_ID").cloned();
         let google_calendar_client_secret =
             environment.get("GOOGLE_CALENDAR_CLIENT_SECRET").cloned();
+        let web_search_provider = environment.get("WEB_SEARCH_PROVIDER").cloned();
+        let web_search_endpoint = environment.get("WEB_SEARCH_ENDPOINT").cloned();
+        let web_search_api_key = environment.get("WEB_SEARCH_API_KEY").cloned();
         let mut enabled_tools = enabled_tools;
         if (google_gmail_client_id.is_some() || microsoft_graph_client_id.is_some())
             && !enabled_tools
@@ -399,6 +429,13 @@ impl Config {
                 .any(|tool| tool == "list_calendar_events")
             {
                 enabled_tools.push("list_calendar_events".to_owned());
+            }
+        }
+        if cfg!(target_os = "macos") {
+            for tool in ["mcp_read_local_file", "mcp_web_search"] {
+                if !enabled_tools.iter().any(|enabled| enabled == tool) {
+                    enabled_tools.push(tool.to_owned());
+                }
             }
         }
         if max_loop_seconds == 0 || max_diff_bytes == 0 {
@@ -431,6 +468,9 @@ impl Config {
             google_gmail_client_secret,
             google_calendar_client_id,
             google_calendar_client_secret,
+            web_search_provider,
+            web_search_endpoint,
+            web_search_api_key,
         })
     }
 }
@@ -755,6 +795,8 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
                 | "get_email"
                 | "search_emails"
                 | "list_calendar_events"
+                | "mcp_read_local_file"
+                | "mcp_web_search"
         ) {
             return Err(AppError::UnknownTool(tool.clone()));
         }
