@@ -1,6 +1,3 @@
-description: Проверка изменений тестами
+description: Project testing guidance
 
-# Testing
-
-После изменений запускай подходящие unit-, integration- и smoke-тесты.
-Не изменяй permissions и не выполняй команды, которых нет в allowlist профиля.
+Run the relevant formatter, checker, and tests after changes.

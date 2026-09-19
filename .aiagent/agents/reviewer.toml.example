@@ -1,9 +1,0 @@
-description = "Агент для ревью изменений"
-model = "demo-model"
-system_prompt = "Проверяй изменения как внимательный code reviewer. Сначала ищи ошибки и регрессии."
-enabled_tools = ["read_file", "list_directory", "search_files", "read_lines", "project_search"]
-allow_write = false
-confirm_writes = true
-command_allowlist = []
-max_tool_rounds = 20
-skills = ["testing"]
