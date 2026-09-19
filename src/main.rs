@@ -85,6 +85,22 @@ async fn main() {
             return;
         }
     };
+    let saved_session = session_path(&session);
+    if saved_session.is_file()
+        && Confirm::new()
+            .with_prompt("Загрузить существующую сессию?")
+            .default(false)
+            .interact()
+            .unwrap_or(false)
+    {
+        match Session::load_from(&saved_session) {
+            Ok(loaded) => {
+                session = loaded;
+                println!("Существующая сессия загружена.");
+            }
+            Err(error) => eprintln!("Предупреждение: не удалось загрузить сессию: {error}"),
+        }
+    }
 
     let catalog = match AgentCatalog::load(&config.working_dir, &config) {
         Ok(catalog) => catalog,
@@ -324,6 +340,20 @@ async fn run_repl(
                 println!("История очищена: {} сообщений.", session.clear_messages());
             }
             ReplCommand::Status => print_status(session),
+            ReplCommand::Tools(argument) if argument.as_deref() == Some("log") => {
+                if session.events().is_empty() {
+                    println!("Лог tools пуст.");
+                } else {
+                    for event in session.events() {
+                        println!(
+                            "- {} {} ({} ms)",
+                            if event.success { "OK" } else { "ERROR" },
+                            event.name,
+                            event.duration_ms
+                        );
+                    }
+                }
+            }
             ReplCommand::Tools(argument) => match argument.as_deref() {
                 None => println!(
                     "Tools: {}\nДоступные tools: {}",
@@ -1005,6 +1035,7 @@ async fn request_completion(
     } else {
         format!("{system_prompt}\n\nTrusted project instructions:\n{project_instructions}")
     };
+    let tool_status = context.status.clone();
     let mut agent = Agent::new(provider, registry, context, profile.max_tool_rounds)
         .with_system_prompt(system_prompt)
         .with_loop_limits(
@@ -1016,7 +1047,7 @@ async fn request_completion(
     println!("\n\x1b[2m┌─ Вы запрашиваете\x1b[0m");
     println!("\x1b[2m│\x1b[0m {prompt}");
     println!("\x1b[2m└─ Ответ\x1b[0m\n");
-    let spinner = Spinner::start();
+    let spinner = Spinner::start(session.model(), &profile.name, tool_status);
     let result = agent.complete(session, prompt).await;
     spinner.stop();
     match result {
@@ -1027,8 +1058,8 @@ async fn request_completion(
                 String::new()
             };
             println!(
-                "\x1b[1;32m◆ Assistant\x1b[0m\n{}{}",
-                response.content, summary
+                "\x1b[1;32m◆ Assistant[{}]\x1b[0m\n{}{}",
+                profile.name, response.content, summary
             );
             if show_stats {
                 print_response_stats(
@@ -1051,16 +1082,34 @@ struct Spinner {
 }
 
 impl Spinner {
-    fn start() -> Self {
+    /// Renders one status line for model thinking and tool execution.
+    fn start(
+        model: &str,
+        role: &str,
+        tool_status: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    ) -> Self {
+        let model = model.to_owned();
+        let role = role.to_owned();
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let signal = stop.clone();
         let handle = std::thread::spawn(move || {
             let frames = ["|", "/", "-", "\\"];
             let mut index = 0;
             while !signal.load(std::sync::atomic::Ordering::Relaxed) {
+                let tool = tool_status
+                    .lock()
+                    .ok()
+                    .and_then(|status| status.clone())
+                    .unwrap_or_else(|| "-".to_owned());
                 print!(
-                    "\r\x1b[2m{} Модель думает...\x1b[0m",
-                    frames[index % frames.len()]
+                    // Clear the complete terminal line before every frame.
+                    // Tool names have different lengths; a plain carriage
+                    // return leaves suffixes from the previous frame visible.
+                    "\r\x1b[2K\x1b[2m{} Assistant[{}] thinking... [model:{}] [tool calling:{}]\x1b[0m",
+                    frames[index % frames.len()],
+                    role,
+                    model,
+                    tool
                 );
                 let _ = std::io::stdout().flush();
                 index += 1;
@@ -1221,4 +1270,5 @@ fn print_status(session: &Session) {
     println!("Модель: {}", session.model());
     println!("Рабочая директория: {}", session.working_dir().display());
     println!("Сообщений: {}", session.messages().len());
+    println!("Событий tools: {}", session.events().len());
 }

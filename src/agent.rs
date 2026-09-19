@@ -134,7 +134,7 @@ impl<P: LlmProvider> Agent<P> {
             if let Some(prompt) = &self.system_prompt {
                 let prompt = if self.workflow_prompt {
                     format!(
-                        "{prompt}\n\nWorkflow: for mail requests, read the requested period, summarize relevant messages, and prepare reply drafts without sending them unless explicitly authorized. For coding requests, analyze -> plan -> patch -> review -> test -> fix -> report what was found, changed files, exact changes, checks, and remaining issues. The host will append a structured final summary for coding tasks. Effective permissions: allow_write={}, enabled_tools={}. For a new file use create_file; it creates missing parent directories automatically (for example src/main.py creates src/). To remove one file use delete_file; never claim file deletion is impossible when it is available, and never recursively delete directories. write_file also creates parent directories; do not first call list_directory to decide whether a requested new directory exists. apply_patch only edits an existing file. Never claim file or directory creation is impossible when create_file or write_file is available. Stop and ask for clarification before ambiguous or dangerous actions.",
+                        "{prompt}\n\nWorkflow: for mail requests, read the requested period, summarize relevant messages, and prepare reply drafts without sending them unless explicitly authorized. For calendar requests, query the calendar tool for the requested range before answering. Never claim to have checked email or a calendar unless the corresponding tool call actually succeeded; if no matching tool was called or it failed, say that the data was not checked and do not invent messages or events. For coding requests, analyze -> plan -> patch -> review -> test -> fix -> report what was found, changed files, exact changes, checks, and remaining issues. The host will append a structured final summary for coding tasks. Effective permissions: allow_write={}, enabled_tools={}. For a new file use create_file; it creates missing parent directories automatically (for example src/main.py creates src/). To remove one file use delete_file; never claim file deletion is impossible when it is available, and never recursively delete directories. write_file also creates parent directories; do not first call list_directory to decide whether a requested new directory exists. apply_patch only edits an existing file. Never claim file or directory creation is impossible when create_file or write_file is available. Stop and ask for clarification before ambiguous or dangerous actions.",
                         self.context.allow_write,
                         self.registry.names().join(", ")
                     )
@@ -181,6 +181,7 @@ impl<P: LlmProvider> Agent<P> {
                     Vec::new()
                 },
             );
+            self.context.set_tool_status(None);
             let response = match self.provider.complete(request).await {
                 Ok(response) => response,
                 Err(error) if is_provider_tool_parse_error(&error) && tool_parse_retries < 2 => {
@@ -294,10 +295,18 @@ impl<P: LlmProvider> Agent<P> {
                         continue;
                     }
                 };
+                self.context.set_tool_status(Some(&call.function.name));
+                let tool_started = Instant::now();
                 let result = self
                     .registry
                     .execute(&call.function.name, args, &self.context)
                     .await;
+                self.context.set_tool_status(None);
+                session.record_tool_event(
+                    &call.function.name,
+                    result.is_ok(),
+                    tool_started.elapsed().as_millis() as u64,
+                );
                 let (content, persist) = match result {
                     Ok(result) => {
                         if matches!(
