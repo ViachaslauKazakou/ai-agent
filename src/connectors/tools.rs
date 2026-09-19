@@ -57,6 +57,10 @@ fn query(args: &Value, body: bool) -> MessageQuery {
             .clamp(1, 100) as usize,
         search: args.get("query").and_then(Value::as_str).map(str::to_owned),
         include_body: body,
+        unread_only: args
+            .get("unread_only")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -67,10 +71,10 @@ impl Tool for ListRecentEmails {
         "list_recent_emails"
     }
     fn description(&self) -> &'static str {
-        "List recent Gmail or Outlook messages; returns headers and previews only. Use this when the user asks to check recent or today's mail."
+        "List recent Gmail or Outlook messages; returns headers and previews only. Set unread_only=true for unread mail. Use get_email after this to read a full body."
     }
     fn parameters_schema(&self) -> Value {
-        json!({"type":"object","properties":{"lookback_hours":{"type":"integer","minimum":1,"maximum":720},"max_messages":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false})
+        json!({"type":"object","properties":{"lookback_hours":{"type":"integer","minimum":1,"maximum":720},"max_messages":{"type":"integer","minimum":1,"maximum":100},"unread_only":{"type":"boolean"}},"additionalProperties":false})
     }
     async fn execute(&self, args: Value, context: &ToolContext) -> Result<ToolResult, AppError> {
         let messages = source(context)?.list_messages(&query(&args, false)).await?;
@@ -119,7 +123,7 @@ impl Tool for SearchEmails {
         "search_emails"
     }
     fn description(&self) -> &'static str {
-        "Search Gmail or Outlook messages by query, without loading bodies."
+        "Search Gmail or Outlook messages by query, without loading bodies. Use get_email with a returned id to read the full body."
     }
     fn parameters_schema(&self) -> Value {
         json!({"type":"object","properties":{"query":{"type":"string"},"max_messages":{"type":"integer","minimum":1,"maximum":100}},"required":["query"],"additionalProperties":false})

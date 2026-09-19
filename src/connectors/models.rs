@@ -16,6 +16,7 @@ pub struct MessageQuery {
     pub max_messages: usize,
     pub search: Option<String>,
     pub include_body: bool,
+    pub unread_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

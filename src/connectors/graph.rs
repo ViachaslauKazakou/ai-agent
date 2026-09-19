@@ -151,7 +151,7 @@ impl MessageSource for GraphMailClient {
     ) -> Result<Vec<NormalizedMessage>, AppError> {
         let limit = query.max_messages.clamp(1, 100);
         let mut path = format!(
-            "/me/mailFolders/inbox/messages?$top={limit}&$orderby=receivedDateTime%20desc&$select=id,conversationId,subject,bodyPreview,sender,toRecipients,receivedDateTime,hasAttachments"
+            "/me/mailFolders/inbox/messages?$top={limit}&$orderby=receivedDateTime%20desc&$select=id,conversationId,subject,bodyPreview,sender,toRecipients,receivedDateTime,hasAttachments,isRead"
         );
         if query.lookback_hours > 0 {
             path.push_str(&format!(
@@ -161,6 +161,9 @@ impl MessageSource for GraphMailClient {
                     .unwrap_or_else(chrono::Utc::now)
                     .to_rfc3339()
             ));
+        }
+        if query.unread_only {
+            path.push_str("&$filter=isRead%20eq%20false");
         }
         if query.include_body {
             path.push_str(",body");
