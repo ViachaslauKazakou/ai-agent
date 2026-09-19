@@ -291,10 +291,12 @@ fn validate_profile(profile: &AgentProfile) -> Result<(), AppError> {
         }
     }
     if profile.allow_write
-        && !profile
-            .enabled_tools
-            .iter()
-            .any(|tool| tool == "write_file" || tool == "create_file")
+        && !profile.enabled_tools.iter().any(|tool| {
+            matches!(
+                tool.as_str(),
+                "write_file" | "create_file" | "apply_patch" | "delete_file" | "run_command"
+            )
+        })
     {
         return Err(AppError::InvalidConfig(format!(
             "агент {} разрешает запись без write_file",

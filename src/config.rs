@@ -646,7 +646,7 @@ skills = ["testing"]
 const DEFAULT_SKILL: &[u8] = b"description: Project testing guidance\n\nRun the relevant formatter, checker, and tests after changes.\n";
 const CODER_AGENT: &str = r#"description = "Агент для разработки и изменения кода"
 system_prompt = "Ты coding-agent. Сначала сформулируй план, вноси минимальные изменения, показывай результат и запускай релевантные проверки. Не обращайся к почте или календарю без явного запроса."
-enabled_tools = ["read_file", "list_directory", "search_files", "read_lines", "project_search", "project_symbols", "project_definition", "project_diagnostics", "security_review", "ci_status", "ci_failure_analysis", "apply_patch", "git_status", "git_diff", "git_log"]
+enabled_tools = ["read_file", "list_directory", "write_file", "create_file", "search_files", "read_lines", "project_search", "project_symbols", "project_definition", "project_diagnostics", "security_review", "ci_status", "ci_failure_analysis", "apply_patch", "git_status", "git_diff", "git_log"]
 allow_write = true
 confirm_writes = true
 command_allowlist = []
