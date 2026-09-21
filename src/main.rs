@@ -1308,8 +1308,20 @@ fn format_number(value: u32) -> String {
 
 #[derive(Clone)]
 enum ConfiguredProvider {
-    LiteLlm(LiteLlmProvider),
-    Ollama(OllamaProvider),
+    LiteLlm {
+        provider: LiteLlmProvider,
+        supports_reasoning_effort: bool,
+        supports_reasoning_with_tools: bool,
+        reasoning_effort_models: Vec<String>,
+        reasoning_with_tools_models: Vec<String>,
+    },
+    Ollama {
+        provider: OllamaProvider,
+        supports_reasoning_effort: bool,
+        supports_reasoning_with_tools: bool,
+        reasoning_effort_models: Vec<String>,
+        reasoning_with_tools_models: Vec<String>,
+    },
 }
 
 impl ConfiguredProvider {
@@ -1328,15 +1340,27 @@ impl ConfiguredProvider {
         profile_config.api_base_url = provider.base_url.clone();
         profile_config.api_key = provider.api_key.clone();
         match provider.kind.as_str() {
-            "ollama" => Ok(Self::Ollama(OllamaProvider::new(&profile_config)?)),
-            _ => Ok(Self::LiteLlm(LiteLlmProvider::new(&profile_config)?)),
+            "ollama" => Ok(Self::Ollama {
+                provider: OllamaProvider::new(&profile_config)?,
+                supports_reasoning_effort: provider.supports_reasoning_effort,
+                supports_reasoning_with_tools: provider.supports_reasoning_with_tools,
+                reasoning_effort_models: provider.reasoning_effort_models.clone(),
+                reasoning_with_tools_models: provider.reasoning_with_tools_models.clone(),
+            }),
+            _ => Ok(Self::LiteLlm {
+                provider: LiteLlmProvider::new(&profile_config)?,
+                supports_reasoning_effort: provider.supports_reasoning_effort,
+                supports_reasoning_with_tools: provider.supports_reasoning_with_tools,
+                reasoning_effort_models: provider.reasoning_effort_models.clone(),
+                reasoning_with_tools_models: provider.reasoning_with_tools_models.clone(),
+            }),
         }
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, ai_agent::AppError> {
         match self {
-            Self::LiteLlm(provider) => provider.list_models().await,
-            Self::Ollama(provider) => provider.list_models().await,
+            Self::LiteLlm { provider, .. } => provider.list_models().await,
+            Self::Ollama { provider, .. } => provider.list_models().await,
         }
     }
 }
@@ -1347,9 +1371,41 @@ impl LlmProvider for ConfiguredProvider {
         &self,
         request: ai_agent::CompletionRequest,
     ) -> Result<ai_agent::CompletionResponse, ai_agent::AppError> {
+        let mut request = request;
+        let (supports_effort, supports_tools, effort_models, tools_models) = match self {
+            Self::LiteLlm {
+                supports_reasoning_effort,
+                supports_reasoning_with_tools,
+                reasoning_effort_models,
+                reasoning_with_tools_models,
+                ..
+            }
+            | Self::Ollama {
+                supports_reasoning_effort,
+                supports_reasoning_with_tools,
+                reasoning_effort_models,
+                reasoning_with_tools_models,
+                ..
+            } => (
+                *supports_reasoning_effort,
+                *supports_reasoning_with_tools,
+                reasoning_effort_models,
+                reasoning_with_tools_models,
+            ),
+        };
+        let model_supports_effort =
+            supports_effort || effort_models.iter().any(|model| model == &request.model);
+        let model_supports_tools =
+            supports_tools || tools_models.iter().any(|model| model == &request.model);
+        if !model_supports_effort {
+            // `none` is the portable value accepted by LiteLLM gateways.
+            request.reasoning_effort = Some("none".to_owned());
+        } else if request.tools.is_some() && !model_supports_tools {
+            request.reasoning_effort = Some("none".to_owned());
+        }
         match self {
-            Self::LiteLlm(provider) => provider.complete(request).await,
-            Self::Ollama(provider) => provider.complete(request).await,
+            Self::LiteLlm { provider, .. } => provider.complete(request).await,
+            Self::Ollama { provider, .. } => provider.complete(request).await,
         }
     }
 }

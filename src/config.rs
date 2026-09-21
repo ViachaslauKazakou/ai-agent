@@ -29,6 +29,14 @@ pub struct ProviderConfig {
     pub base_url: String,
     pub api_key: Option<String>,
     pub models: Vec<String>,
+    /// Whether the endpoint accepts the OpenAI `reasoning_effort` field.
+    pub supports_reasoning_effort: bool,
+    /// Whether reasoning can be combined with function tools.
+    pub supports_reasoning_with_tools: bool,
+    /// Model ids allowed to use reasoning when provider capabilities differ by model.
+    pub reasoning_effort_models: Vec<String>,
+    /// Model ids allowed to combine reasoning with function tools.
+    pub reasoning_with_tools_models: Vec<String>,
 }
 
 impl Default for ProviderConfig {
@@ -38,6 +46,12 @@ impl Default for ProviderConfig {
             base_url: DEFAULT_BASE_URL.to_owned(),
             api_key: None,
             models: Vec::new(),
+            // Existing provider entries keep reasoning enabled unless they
+            // explicitly opt out in providers.json.
+            supports_reasoning_effort: true,
+            supports_reasoning_with_tools: false,
+            reasoning_effort_models: Vec::new(),
+            reasoning_with_tools_models: Vec::new(),
         }
     }
 }
@@ -380,6 +394,10 @@ impl Config {
                         .unwrap_or_else(|| DEFAULT_BASE_URL.to_owned()),
                     api_key: environment.get("LITELLM_API_KEY").cloned(),
                     models: Vec::new(),
+                    supports_reasoning_effort: false,
+                    supports_reasoning_with_tools: false,
+                    reasoning_effort_models: Vec::new(),
+                    reasoning_with_tools_models: Vec::new(),
                 },
             );
             providers.providers.insert(
@@ -392,6 +410,10 @@ impl Config {
                         .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_owned()),
                     api_key: environment.get("OLLAMA_API_KEY").cloned(),
                     models: Vec::new(),
+                    supports_reasoning_effort: false,
+                    supports_reasoning_with_tools: false,
+                    reasoning_effort_models: Vec::new(),
+                    reasoning_with_tools_models: Vec::new(),
                 },
             );
         }
@@ -702,6 +724,10 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
                         .cloned()
                         .filter(|value| !value.is_empty()),
                     models: Vec::new(),
+                    supports_reasoning_effort: false,
+                    supports_reasoning_with_tools: false,
+                    reasoning_effort_models: Vec::new(),
+                    reasoning_with_tools_models: Vec::new(),
                 },
             ),
             (
@@ -714,6 +740,10 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
                         .cloned()
                         .filter(|value| !value.is_empty()),
                     models: Vec::new(),
+                    supports_reasoning_effort: false,
+                    supports_reasoning_with_tools: false,
+                    reasoning_effort_models: Vec::new(),
+                    reasoning_with_tools_models: Vec::new(),
                 },
             ),
         ]

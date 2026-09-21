@@ -190,18 +190,15 @@ impl CompletionRequest {
         tools: Vec<ToolDefinition>,
         reasoning_effort: impl Into<String>,
     ) -> Self {
-        let has_tools = !tools.is_empty();
         Self {
             model: model.into(),
             messages,
             tools: (!tools.is_empty()).then_some(tools),
             temperature: None,
             max_tokens: None,
-            reasoning_effort: Some(if has_tools {
-                "none".to_owned()
-            } else {
-                reasoning_effort.into()
-            }),
+            // The provider adapter downgrades this when its endpoint does not
+            // support reasoning together with function tools.
+            reasoning_effort: Some(reasoning_effort.into()),
         }
     }
 }
@@ -468,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_requests_disable_reasoning_effort() {
+    fn tool_requests_preserve_configured_reasoning_effort_for_capable_provider() {
         let request = CompletionRequest::from_llm_messages(
             "reasoning-model",
             Vec::new(),
@@ -480,10 +477,10 @@ mod tests {
             "high",
         );
 
-        assert_eq!(request.reasoning_effort.as_deref(), Some("none"));
+        assert_eq!(request.reasoning_effort.as_deref(), Some("high"));
         assert_eq!(
             serde_json::to_value(request).unwrap()["reasoning_effort"],
-            "none"
+            "high"
         );
     }
 

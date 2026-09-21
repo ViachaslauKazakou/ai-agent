@@ -90,6 +90,10 @@ LiteLLM, Ollama и любого OpenAI-compatible API:
       "base_url": "https://api.openai.com/v1",
       "api_key": "sk-...",
       "models": ["gpt-4o-mini", "gpt-4o"]
+      ,"supports_reasoning_effort": false,
+      "supports_reasoning_with_tools": false,
+      "reasoning_effort_models": [],
+      "reasoning_with_tools_models": []
     }
   }
 }
@@ -144,6 +148,22 @@ LiteLLM, Ollama и любого OpenAI-compatible API:
 имя записи, `base_url`, ключ и список моделей. Для провайдера, который не
 требует ключа, используйте `"api_key": null`. Если `models` оставить пустым,
 агент запросит доступные модели у endpoint через `GET /models`.
+
+Для gateway, который поддерживает reasoning только для отдельных моделей,
+оставьте capability-флаги выключенными и укажите исключение по имени модели:
+
+```json
+{
+  "supports_reasoning_effort": false,
+  "supports_reasoning_with_tools": false,
+  "reasoning_effort_models": ["elite-gpt-5.6-luna"],
+  "reasoning_with_tools_models": ["elite-gpt-5.6-luna"]
+}
+```
+
+Это позволяет одному провайдеру безопасно обслуживать разные маршруты: прямой
+OpenAI-compatible endpoint получит `reasoning_effort: none` для tools, а Elite
+маршрут с той же моделью сможет сохранить выбранный effort.
 
 Не добавляйте реальные API keys в Git. Файл `.aiagent/providers.json` уже
 исключён из Git, но также рекомендуется ограничить права доступа к нему:
