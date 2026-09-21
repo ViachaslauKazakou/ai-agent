@@ -25,7 +25,7 @@
 - ограничение agent loop через `max_tool_rounds`;
 - coding-agent workflow с планом, малыми patch, проверками и итоговым summary;
 - лимиты loop по времени (`max_loop_seconds`) и размеру diff (`max_diff_bytes`);
-- автоматический выбор доступной Ollama-модели вместо `demo-model` с сохранением выбора в `.aiagent/config.json`;
+- автоматический выбор доступной модели вместо `demo-model` с сохранением выбора в `.aiagent/config.json`;
 - переключение tools во время REPL командами `/tools on` и `/tools off`;
 - project-local агенты в `.aiagent/agents/*.toml`;
 - project-local skills в `.aiagent/skills/<name>/SKILL.md`;
@@ -71,16 +71,30 @@ ai-agent --init
 имеют наивысший приоритет. Секреты не выводятся в логах и `--verbose`, а
 `.aiagent/config.json` и `.aiagent/providers.json` исключены из Git через `.gitignore`.
 
-`config.json` содержит `default_provider`, `model` и настройки агента. Поля
-`api_base_url` и `api_key` в нём не используются: credentials, URL и список моделей
-находятся отдельно в `providers.json`. Формат провайдера единый для
-LiteLLM, Ollama и любого OpenAI-compatible API:
+`config.json` содержит `default_provider`, `model`, `reasoning_effort` и настройки
+агента. Поля `api_base_url` и `api_key` в нём не используются: credentials, URL,
+список моделей и capabilities находятся отдельно в `providers.json`. Формат
+провайдера единый для LiteLLM, Ollama и любого OpenAI-compatible API.
+
+Пример `.aiagent/config.json`:
+
+```json
+{
+  "default_provider": "litellm",
+  "model": "gpt-oss:20b",
+  "reasoning_effort": "medium",
+  "working_dir": ".",
+  "max_tool_rounds": 20,
+  "request_timeout_secs": 120,
+  "log_level": "info"
+}
+```
 
 Уровень reasoning по умолчанию — `medium`. Его можно изменить в `config.json`
 (`none`, `low`, `medium`, `high`) или во время REPL командами `/effort` и
-`/effort high`. Для запросов с function tools агент автоматически использует
-`reasoning_effort: none`, поскольку Chat Completions некоторых LiteLLM-моделей
-не поддерживает reasoning вместе с tools.
+`/effort high`. Поведение для function tools определяется capabilities
+конкретного провайдера: несовместимому endpoint отправляется
+`reasoning_effort: none`, а совместимый endpoint сохраняет выбранный уровень.
 
 ```json
 {
@@ -89,8 +103,8 @@ LiteLLM, Ollama и любого OpenAI-compatible API:
       "kind": "openai-compatible",
       "base_url": "https://api.openai.com/v1",
       "api_key": "sk-...",
-      "models": ["gpt-4o-mini", "gpt-4o"]
-      ,"supports_reasoning_effort": false,
+      "models": ["gpt-4o-mini", "gpt-4o"],
+      "supports_reasoning_effort": true,
       "supports_reasoning_with_tools": false,
       "reasoning_effort_models": [],
       "reasoning_with_tools_models": []
@@ -111,7 +125,11 @@ LiteLLM, Ollama и любого OpenAI-compatible API:
       "kind": "ollama",
       "base_url": "http://localhost:11434/v1",
       "api_key": null,
-      "models": []
+      "models": ["llama3.2"],
+      "supports_reasoning_effort": false,
+      "supports_reasoning_with_tools": false,
+      "reasoning_effort_models": [],
+      "reasoning_with_tools_models": []
     },
     "openai": {
       "kind": "openai-compatible",
@@ -120,7 +138,11 @@ LiteLLM, Ollama и любого OpenAI-compatible API:
       "models": [
         "gpt-4o-mini",
         "gpt-4o"
-      ]
+      ],
+      "supports_reasoning_effort": true,
+      "supports_reasoning_with_tools": false,
+      "reasoning_effort_models": [],
+      "reasoning_with_tools_models": []
     }
   }
 }
@@ -146,8 +168,10 @@ LiteLLM, Ollama и любого OpenAI-compatible API:
 
 Любой сервис с OpenAI-compatible API добавляется таким же способом: замените
 имя записи, `base_url`, ключ и список моделей. Для провайдера, который не
-требует ключа, используйте `"api_key": null`. Если `models` оставить пустым,
-агент запросит доступные модели у endpoint через `GET /models`.
+требует ключа, используйте `"api_key": null`. Поле `models` — это allowlist:
+только перечисленные в нём модели появляются в picker `/model`. Если список
+пустой, `/model` не добавляет модели из endpoint; `/models` всё равно может
+показать модели, возвращённые текущим endpoint через `GET /models`.
 
 Для gateway, который поддерживает reasoning только для отдельных моделей,
 оставьте capability-флаги выключенными и укажите исключение по имени модели:
@@ -163,7 +187,9 @@ LiteLLM, Ollama и любого OpenAI-compatible API:
 
 Это позволяет одному провайдеру безопасно обслуживать разные маршруты: прямой
 OpenAI-compatible endpoint получит `reasoning_effort: none` для tools, а Elite
-маршрут с той же моделью сможет сохранить выбранный effort.
+маршрут с той же моделью сможет сохранить выбранный effort. Если capability
+относится ко всем моделям провайдера, используйте `supports_*`; списки
+`*_models` добавляют точечные исключения.
 
 Не добавляйте реальные API keys в Git. Файл `.aiagent/providers.json` уже
 исключён из Git, но также рекомендуется ограничить права доступа к нему:
@@ -172,18 +198,18 @@ OpenAI-compatible endpoint получит `reasoning_effort: none` для tools,
 chmod 600 .aiagent/providers.json
 ```
 
-Ключи не отображаются в `/config`. Во время REPL `/models` показывает провайдеров
-и их модели, а `/models openai` переключает провайдера без перезапуска. Команда
-`/model` открывает общий picker с группировкой `provider / model`. В picker
-попадают только модели, явно перечисленные в `providers.json`; модели, которые
-endpoint возвращает дополнительно через `GET /models`, туда не добавляются.
+Ключи не отображаются в `/config`. Во время REPL `/models` показывает настроенные
+провайдеры, их модели и список моделей текущего endpoint, а `/models openai`
+переключает провайдера без перезапуска. Команда `/model` открывает общий picker
+с группировкой `provider / model`; в picker попадают только модели, явно
+перечисленные в `providers.json`.
 Такая модель registry оставляет место для будущего routing по ролям
 задач: например, дешёвая модель для планирования и сильная для сложного coding loop.
 
-Если в `.aiagent/config.json` оставлена модель `demo-model`, при запуске Ollama агент
-получает список `/models`, выбирает доступную модель с приоритетом `coder`,
-`qwen` или `llama`, а затем сохраняет её в `.aiagent/config.json`. Явная модель из CLI
-(`--model`) имеет приоритет и автоматически не заменяется.
+Если в `.aiagent/config.json` оставлена модель `demo-model`, при запуске агент
+получает список `/models` текущего endpoint, выбирает доступную модель с приоритетом
+`coder`, `qwen` или `llama`, а затем сохраняет её в `.aiagent/config.json`. Явная
+модель из CLI (`--model`) имеет приоритет и автоматически не заменяется.
 
 ## Работа с почтой
 
@@ -542,6 +568,8 @@ ai-agent
 /search QUERY  поиск по индексированным фрагментам
 /model         показать текущую модель
 /model NAME    изменить модель сессии
+/effort        выбрать reasoning effort
+/effort VALUE  установить none, low, medium или high
 /stats         показать настройки статистики
 /stats on|off  включить или выключить токены и время ответа
 /clear         очистить историю
