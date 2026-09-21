@@ -17,13 +17,52 @@ const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_LOG_LEVEL: &str = "info";
 const JSON_CONFIG_FILE: &str = "config.json";
 pub const PROJECT_CONFIG_PATH: &str = ".aiagent/config.json";
+pub const PROVIDERS_CONFIG_PATH: &str = ".aiagent/providers.json";
+
+/// Credentials and endpoint information for one OpenAI-compatible provider.
+/// The file is project-local and should never be committed to source control.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct ProviderConfig {
+    pub kind: String,
+    pub base_url: String,
+    pub api_key: Option<String>,
+    pub models: Vec<String>,
+}
+
+impl Default for ProviderConfig {
+    fn default() -> Self {
+        Self {
+            kind: "openai-compatible".to_owned(),
+            base_url: DEFAULT_BASE_URL.to_owned(),
+            api_key: None,
+            models: Vec::new(),
+        }
+    }
+}
+
+/// Named provider registry loaded from `.aiagent/providers.json`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct ProviderRegistry {
+    pub providers: std::collections::BTreeMap<String, ProviderConfig>,
+}
+
+impl ProviderRegistry {
+    pub fn provider(&self, name: &str) -> Option<&ProviderConfig> {
+        self.providers.get(name)
+    }
+
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.providers.keys().map(String::as_str)
+    }
+}
 
 #[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 struct JsonConfig {
-    provider: Option<String>,
-    api_base_url: Option<String>,
-    api_key: Option<String>,
+    #[serde(alias = "provider")]
+    default_provider: Option<String>,
     model: Option<String>,
     working_dir: Option<String>,
     max_tool_rounds: Option<usize>,
@@ -71,6 +110,8 @@ struct AgentFileConfig {
 pub struct Config {
     /// Имя LLM-провайдера, например `litellm`.
     pub provider: String,
+    /// All configured providers available for runtime switching.
+    pub providers: ProviderRegistry,
     /// Base URL будущего LLM-провайдера.
     pub api_base_url: String,
     /// Необязательный секрет API; не включается в отображение конфигурации.
@@ -115,8 +156,7 @@ impl fmt::Debug for Config {
         formatter
             .debug_struct("Config")
             .field("provider", &self.provider)
-            .field("api_base_url", &self.api_base_url)
-            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("providers", &self.providers.names().collect::<Vec<_>>())
             .field("model", &self.model)
             .field("working_dir", &self.working_dir)
             .field("max_tool_rounds", &self.max_tool_rounds)
@@ -137,8 +177,7 @@ impl Config {
     pub fn to_pretty_json(&self) -> String {
         let value = serde_json::json!({
             "provider": self.provider,
-            "api_base_url": self.api_base_url,
-            "api_key": self.api_key.as_ref().map(|_| "<redacted>"),
+            "default_provider": self.provider,
             "model": self.model,
             "working_dir": self.working_dir,
             "max_tool_rounds": self.max_tool_rounds,
@@ -173,6 +212,7 @@ impl Config {
         initialize_project(&project_dir)?;
         let json_path = project_dir.join(PROJECT_CONFIG_PATH);
         let json = load_json_config(&json_path)?;
+        let providers = load_provider_registry(&project_dir.join(PROVIDERS_CONFIG_PATH))?;
         let mut environment = env::vars().collect::<HashMap<_, _>>();
         if json.is_none() {
             match dotenvy::from_path(project_dir.join(".env")) {
@@ -182,14 +222,12 @@ impl Config {
             }
         }
         if let Some(config) = &json {
-            set_if_some(&mut environment, "LLM_PROVIDER", config.provider.clone());
-            set_if_some(&mut environment, "MODEL", config.model.clone());
             set_if_some(
                 &mut environment,
-                "LITELLM_BASE_URL",
-                config.api_base_url.clone(),
+                "LLM_PROVIDER",
+                config.default_provider.clone(),
             );
-            set_if_some(&mut environment, "LITELLM_API_KEY", config.api_key.clone());
+            set_if_some(&mut environment, "MODEL", config.model.clone());
             if let Some(working_dir) = &config.working_dir {
                 let path = PathBuf::from(working_dir);
                 let resolved = if path.is_absolute() {
@@ -274,11 +312,17 @@ impl Config {
         if cli.working_dir.is_none() {
             cli.working_dir = Some(project_dir);
         }
-        Self::from_sources_with_file(&cli, &environment, file)
+        Self::from_sources_with_file(&cli, &environment, file, providers)
     }
 
     pub fn save_model(&self, model: &str) -> Result<(), AppError> {
-        persist_model(&self.working_dir, model)
+        self.save_selection(&self.provider, model)
+    }
+
+    /// Persists the active provider and model while leaving provider secrets in
+    /// the separate providers registry.
+    pub fn save_selection(&self, provider: &str, model: &str) -> Result<(), AppError> {
+        persist_selection(&self.working_dir, provider, model)
     }
 
     /// Собирает конфигурацию из defaults, переданного окружения и CLI.
@@ -286,13 +330,19 @@ impl Config {
         cli: &Cli,
         environment: &HashMap<String, String>,
     ) -> Result<Self, AppError> {
-        Self::from_sources_with_file(cli, environment, FileConfig::default())
+        Self::from_sources_with_file(
+            cli,
+            environment,
+            FileConfig::default(),
+            ProviderRegistry::default(),
+        )
     }
 
     fn from_sources_with_file(
         cli: &Cli,
         environment: &HashMap<String, String>,
         file: FileConfig,
+        mut providers: ProviderRegistry,
     ) -> Result<Self, AppError> {
         let file_agent = file.agent.unwrap_or_default();
         let provider = cli
@@ -305,14 +355,45 @@ impl Config {
                 "LLM_PROVIDER не может быть пустым".to_owned(),
             ));
         }
-        if provider != "litellm" && provider != "ollama" {
-            return Err(AppError::InvalidConfig(format!(
-                "неподдерживаемый LLM_PROVIDER: {provider}"
-            )));
+        if providers.providers.is_empty() {
+            providers.providers.insert(
+                "litellm".to_owned(),
+                ProviderConfig {
+                    kind: "openai-compatible".to_owned(),
+                    base_url: environment
+                        .get("LITELLM_BASE_URL")
+                        .cloned()
+                        .unwrap_or_else(|| DEFAULT_BASE_URL.to_owned()),
+                    api_key: environment.get("LITELLM_API_KEY").cloned(),
+                    models: Vec::new(),
+                },
+            );
+            providers.providers.insert(
+                "ollama".to_owned(),
+                ProviderConfig {
+                    kind: "ollama".to_owned(),
+                    base_url: environment
+                        .get("OLLAMA_BASE_URL")
+                        .cloned()
+                        .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_owned()),
+                    api_key: environment.get("OLLAMA_API_KEY").cloned(),
+                    models: Vec::new(),
+                },
+            );
         }
+        let provider_config = providers.provider(&provider).ok_or_else(|| {
+            AppError::InvalidConfig(format!("провайдер не найден в providers.json: {provider}"))
+        })?;
         let base_url = cli
             .base_url
             .clone()
+            .or_else(|| {
+                if provider_config.base_url.trim().is_empty() {
+                    None
+                } else {
+                    Some(provider_config.base_url.clone())
+                }
+            })
             .or_else(|| {
                 let variable = if provider == "ollama" {
                     "OLLAMA_BASE_URL"
@@ -328,11 +409,13 @@ impl Config {
                     DEFAULT_BASE_URL.to_owned()
                 }
             });
-        let api_key = if provider == "ollama" {
-            environment.get("OLLAMA_API_KEY").cloned()
-        } else {
-            environment.get("LITELLM_API_KEY").cloned()
-        };
+        let api_key = provider_config.api_key.clone().or_else(|| {
+            if provider == "ollama" {
+                environment.get("OLLAMA_API_KEY").cloned()
+            } else {
+                environment.get("LITELLM_API_KEY").cloned()
+            }
+        });
         let model = cli
             .model
             .clone()
@@ -447,6 +530,7 @@ impl Config {
 
         Ok(Self {
             provider,
+            providers,
             api_base_url: base_url,
             api_key,
             model,
@@ -533,22 +617,15 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
         write_if_missing(directory.join("SKILL.md"), content)?;
     }
     let config_path = project_dir.join(PROJECT_CONFIG_PATH);
-    if config_path.exists() {
-        return Ok(false);
-    }
+    let config_exists = config_path.exists();
     let values = load_env_file(project_dir.join(".env"))
         .or_else(|| load_env_file(project_dir.join(".env.example")))
         .unwrap_or_default();
     let mut config = JsonConfig {
-        provider: values
+        default_provider: values
             .get("LLM_PROVIDER")
             .cloned()
             .or_else(|| Some(DEFAULT_PROVIDER.to_owned())),
-        api_base_url: values.get("LITELLM_BASE_URL").cloned(),
-        api_key: values
-            .get("LITELLM_API_KEY")
-            .cloned()
-            .filter(|value| !value.is_empty()),
         model: values
             .get("MODEL")
             .cloned()
@@ -586,7 +663,42 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
     }
     let data = serde_json::to_vec_pretty(&config)
         .map_err(|error| AppError::AgentConfig(error.to_string()))?;
-    write_if_missing(config_path, &data).map(|_| true)
+    write_if_missing(config_path, &data)?;
+    let providers_path = project_dir.join(PROVIDERS_CONFIG_PATH);
+    let providers = ProviderRegistry {
+        providers: [
+            (
+                "litellm".to_owned(),
+                ProviderConfig {
+                    kind: "openai-compatible".to_owned(),
+                    base_url: DEFAULT_BASE_URL.to_owned(),
+                    api_key: values
+                        .get("LITELLM_API_KEY")
+                        .cloned()
+                        .filter(|value| !value.is_empty()),
+                    models: Vec::new(),
+                },
+            ),
+            (
+                "ollama".to_owned(),
+                ProviderConfig {
+                    kind: "ollama".to_owned(),
+                    base_url: DEFAULT_OLLAMA_BASE_URL.to_owned(),
+                    api_key: values
+                        .get("OLLAMA_API_KEY")
+                        .cloned()
+                        .filter(|value| !value.is_empty()),
+                    models: Vec::new(),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let provider_data = serde_json::to_vec_pretty(&providers)
+        .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    let providers_created = write_if_missing(providers_path, provider_data)?;
+    Ok(!config_exists || providers_created)
 }
 
 fn migrate_legacy_project_config(project_dir: &Path) -> Result<(), AppError> {
@@ -618,9 +730,10 @@ fn migrate_legacy_project_config(project_dir: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn persist_model(project_dir: &Path, model: &str) -> Result<(), AppError> {
+pub fn persist_selection(project_dir: &Path, provider: &str, model: &str) -> Result<(), AppError> {
     let path = project_dir.join(PROJECT_CONFIG_PATH);
     let mut config = load_json_config(&path)?.unwrap_or_default();
+    config.default_provider = Some(provider.to_owned());
     config.model = Some(model.to_owned());
     let data = serde_json::to_vec_pretty(&config)
         .map_err(|error| AppError::AgentConfig(error.to_string()))?;
@@ -633,6 +746,20 @@ fn load_json_config(path: &Path) -> Result<Option<JsonConfig>, AppError> {
             .map(Some)
             .map_err(|error| AppError::AgentConfig(format!("{}: {error}", path.display()))),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(AppError::AgentConfig(format!(
+            "{}: {error}",
+            path.display()
+        ))),
+    }
+}
+
+fn load_provider_registry(path: &Path) -> Result<ProviderRegistry, AppError> {
+    match fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str(&content)
+            .map_err(|error| AppError::AgentConfig(format!("{}: {error}", path.display()))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(ProviderRegistry::default())
+        }
         Err(error) => Err(AppError::AgentConfig(format!(
             "{}: {error}",
             path.display()
@@ -870,7 +997,7 @@ fn absolute_existing_directory(value: &str) -> Result<PathBuf, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentFileConfig, Config, FileConfig, initialize_project};
+    use super::{AgentFileConfig, Config, FileConfig, ProviderRegistry, initialize_project};
     use crate::cli::Cli;
     use clap::Parser;
     use std::{collections::HashMap, path::Path};
@@ -883,7 +1010,6 @@ mod tests {
     fn applies_defaults_when_environment_and_cli_are_empty() {
         let config = Config::from_sources(&cli(&["--working-dir", "."]), &HashMap::new()).unwrap();
 
-        assert_eq!(config.api_base_url, "http://localhost:4000/v1");
         assert_eq!(config.provider, "litellm");
         assert_eq!(config.model, "demo-model");
         assert_eq!(config.max_tool_rounds, 20);
@@ -920,7 +1046,6 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(config.api_base_url, "http://cli/v1");
         assert_eq!(config.model, "cli-model");
         assert_eq!(config.max_tool_rounds, 7);
         assert_eq!(config.request_timeout_secs, 30);
@@ -995,6 +1120,7 @@ mod tests {
                     max_diff_bytes: None,
                 }),
             },
+            ProviderRegistry::default(),
         );
 
         assert!(matches!(result, Err(crate::AppError::InvalidConfig(_))));
@@ -1016,6 +1142,7 @@ mod tests {
                     max_diff_bytes: None,
                 }),
             },
+            ProviderRegistry::default(),
         );
 
         assert_eq!(
@@ -1031,8 +1158,41 @@ mod tests {
         assert!(initialize_project(&root).unwrap());
         assert!(!initialize_project(&root).unwrap());
         assert!(root.join(".aiagent/config.json").is_file());
+        assert!(root.join(".aiagent/providers.json").is_file());
         assert!(root.join(".aiagent/agents/default.toml").is_file());
         assert!(root.join(".aiagent/skills/testing/SKILL.md").is_file());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn initialization_repairs_missing_provider_registry_without_overwriting_config() {
+        let root =
+            std::env::temp_dir().join(format!("ai-bootstrap-provider-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        initialize_project(&root).unwrap();
+        let config_path = root.join(".aiagent/config.json");
+        let original_config = std::fs::read(&config_path).unwrap();
+        std::fs::remove_file(root.join(".aiagent/providers.json")).unwrap();
+
+        assert!(initialize_project(&root).unwrap());
+        assert_eq!(std::fs::read(config_path).unwrap(), original_config);
+        assert!(root.join(".aiagent/providers.json").is_file());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn initialization_repairs_missing_runtime_config_without_overwriting_providers() {
+        let root =
+            std::env::temp_dir().join(format!("ai-bootstrap-config-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        initialize_project(&root).unwrap();
+        let providers_path = root.join(".aiagent/providers.json");
+        let original_providers = std::fs::read(&providers_path).unwrap();
+        std::fs::remove_file(root.join(".aiagent/config.json")).unwrap();
+
+        assert!(initialize_project(&root).unwrap());
+        assert_eq!(std::fs::read(providers_path).unwrap(), original_providers);
+        assert!(root.join(".aiagent/config.json").is_file());
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -134,7 +134,7 @@ async fn main() {
         };
     active_profile.model = model.clone();
     if cli.model.is_some()
-        && let Err(error) = config.save_model(&model)
+        && let Err(error) = config.save_selection(&active_profile.provider, &model)
     {
         eprintln!("Предупреждение: модель не сохранена в config.json: {error}");
     }
@@ -204,28 +204,50 @@ async fn select_model(
         .ok_or_else(|| {
             ai_agent::AppError::LlmResponse("провайдер не вернул доступных моделей".to_owned())
         })?;
-    config.save_model(selected)?;
+    config.save_selection(&profile.provider, selected)?;
     println!("Автоматически выбрана доступная модель: {selected}");
     Ok((provider, selected.to_owned()))
 }
 
 async fn choose_model(
-    provider: &ConfiguredProvider,
+    config: &Config,
+    profile: &AgentProfile,
     current: &str,
-) -> Result<Option<String>, ai_agent::AppError> {
-    let models = provider.list_models().await?;
-    if models.is_empty() {
+) -> Result<Option<(String, String)>, ai_agent::AppError> {
+    let mut choices = Vec::new();
+    for (provider_name, provider_config) in &config.providers.providers {
+        choices.extend(
+            provider_config
+                .models
+                .iter()
+                .cloned()
+                .map(|model| (provider_name.clone(), model)),
+        );
+        if provider_config.models.is_empty() {
+            let mut provider_profile = profile.clone();
+            provider_profile.provider = provider_name.clone();
+            let runtime_provider = ConfiguredProvider::new(config, &provider_profile)?;
+            choices.extend(
+                runtime_provider
+                    .list_models()
+                    .await?
+                    .into_iter()
+                    .map(|model| (provider_name.clone(), model.id)),
+            );
+        }
+    }
+    if choices.is_empty() {
         return Err(ai_agent::AppError::LlmResponse(
-            "провайдер не вернул доступных моделей".to_owned(),
+            "в providers.json и endpoint не найдено доступных моделей".to_owned(),
         ));
     }
-    let labels = models
+    let labels = choices
         .iter()
-        .map(|model| model.id.clone())
+        .map(|(provider, model)| format!("{provider} / {model}"))
         .collect::<Vec<_>>();
     let initial = labels
         .iter()
-        .position(|model| model == current)
+        .position(|label| label.ends_with(&format!(" / {current}")))
         .unwrap_or(0);
     let selection = Select::new()
         .with_prompt("Выберите модель (↑/↓, Enter)")
@@ -233,7 +255,7 @@ async fn choose_model(
         .default(initial)
         .interact_opt()
         .map_err(|error| ai_agent::AppError::Tool(format!("model picker: {error}")))?;
-    Ok(selection.map(|index| labels[index].clone()))
+    Ok(selection.map(|index| choices[index].clone()))
 }
 
 async fn run_scheduler(
@@ -376,16 +398,45 @@ async fn run_repl(
                     "Неизвестный режим tools: {value}. Используйте /tools on или /tools off."
                 ),
             },
-            ReplCommand::Models => match provider.list_models().await {
-                Ok(models) if models.is_empty() => println!("Доступные модели не найдены."),
-                Ok(models) => {
-                    println!("Доступные модели:");
-                    for model in models {
-                        println!("- {}", model.id);
+            ReplCommand::Models(provider_name) => {
+                if let Some(name) = provider_name {
+                    if !config.providers.providers.contains_key(&name) {
+                        println!("Неизвестный провайдер: {name}");
+                        continue;
+                    }
+                    active_profile.provider = name.clone();
+                    match ConfiguredProvider::new(config, &active_profile) {
+                        Ok(new_provider) => {
+                            provider = new_provider;
+                            if let Err(error) = config.save_selection(&name, session.model()) {
+                                println!(
+                                    "Предупреждение: провайдер изменён, но не сохранён: {error}"
+                                );
+                            }
+                            println!(
+                                "Активный провайдер: {name}. Используйте /model для выбора модели."
+                            );
+                        }
+                        Err(error) => println!("Ошибка провайдера: {error}"),
+                    }
+                } else {
+                    for (name, provider_config) in &config.providers.providers {
+                        println!("Провайдер: {name} ({})", provider_config.kind);
+                        for model in &provider_config.models {
+                            println!("  - {model} (config)");
+                        }
+                    }
+                    match provider.list_models().await {
+                        Ok(models) if models.is_empty() => println!("Доступные модели не найдены."),
+                        Ok(models) => {
+                            for model in models {
+                                println!("- {}", model.id);
+                            }
+                        }
+                        Err(error) => println!("Ошибка получения моделей: {error}"),
                     }
                 }
-                Err(error) => println!("Ошибка получения моделей: {error}"),
-            },
+            }
             ReplCommand::Agents => {
                 for profile in catalog.profiles() {
                     println!("- {}: {}", profile.name, profile.description);
@@ -530,7 +581,7 @@ async fn run_repl(
             ReplCommand::Model(Some(model)) => match session.set_model(model.clone()) {
                 Ok(()) => {
                     active_profile.model = model.clone();
-                    if let Err(error) = config.save_model(&model) {
+                    if let Err(error) = config.save_selection(&active_profile.provider, &model) {
                         println!("Предупреждение: модель изменена, но не сохранена: {error}");
                     }
                     println!(
@@ -540,21 +591,35 @@ async fn run_repl(
                 }
                 Err(error) => println!("Ошибка модели: {error}"),
             },
-            ReplCommand::Model(None) => match choose_model(&provider, session.model()).await {
-                Ok(Some(model)) => {
-                    if let Err(error) = session.set_model(model.clone()) {
-                        println!("Ошибка модели: {error}");
-                    } else {
-                        active_profile.model = model.clone();
-                        if let Err(error) = config.save_model(&model) {
-                            println!("Предупреждение: модель изменена, но не сохранена: {error}");
+            ReplCommand::Model(None) => {
+                match choose_model(config, &active_profile, session.model()).await {
+                    Ok(Some((selected_provider, model))) => {
+                        if selected_provider != active_profile.provider {
+                            active_profile.provider = selected_provider.clone();
+                            match ConfiguredProvider::new(config, &active_profile) {
+                                Ok(new_provider) => provider = new_provider,
+                                Err(error) => {
+                                    println!("Ошибка переключения провайдера: {error}");
+                                    continue;
+                                }
+                            }
                         }
-                        println!("\x1b[32m✓\x1b[0m Модель изменена: \x1b[1m{}\x1b[0m", model);
+                        if let Err(error) = session.set_model(model.clone()) {
+                            println!("Ошибка модели: {error}");
+                        } else {
+                            active_profile.model = model.clone();
+                            if let Err(error) = config.save_selection(&selected_provider, &model) {
+                                println!(
+                                    "Предупреждение: модель изменена, но не сохранена: {error}"
+                                );
+                            }
+                            println!("\x1b[32m✓\x1b[0m Модель изменена: \x1b[1m{}\x1b[0m", model);
+                        }
                     }
+                    Ok(None) => {}
+                    Err(error) => println!("Ошибка получения моделей: {error}"),
                 }
-                Ok(None) => {}
-                Err(error) => println!("Ошибка получения моделей: {error}"),
-            },
+            }
             ReplCommand::Stats(setting) => match setting.as_deref() {
                 Some("on") => {
                     show_stats = true;
@@ -1224,19 +1289,20 @@ impl ConfiguredProvider {
     fn new(config: &Config, profile: &AgentProfile) -> Result<Self, ai_agent::AppError> {
         let mut profile_config = config.clone();
         profile_config.provider = profile.provider.clone();
-        if profile.provider == "ollama" && config.provider != "ollama" {
-            profile_config.api_base_url = "http://localhost:11434/v1".to_owned();
-            profile_config.api_key = None;
-        } else if profile.provider == "litellm" && config.provider != "litellm" {
-            profile_config.api_base_url = "http://localhost:4000/v1".to_owned();
-            profile_config.api_key = None;
-        }
-        match profile.provider.as_str() {
-            "litellm" => Ok(Self::LiteLlm(LiteLlmProvider::new(&profile_config)?)),
+        let provider = config
+            .providers
+            .provider(&profile.provider)
+            .ok_or_else(|| {
+                ai_agent::AppError::InvalidConfig(format!(
+                    "провайдер не найден: {}",
+                    profile.provider
+                ))
+            })?;
+        profile_config.api_base_url = provider.base_url.clone();
+        profile_config.api_key = provider.api_key.clone();
+        match provider.kind.as_str() {
             "ollama" => Ok(Self::Ollama(OllamaProvider::new(&profile_config)?)),
-            other => Err(ai_agent::AppError::InvalidConfig(format!(
-                "неподдерживаемый LLM_PROVIDER: {other}"
-            ))),
+            _ => Ok(Self::LiteLlm(LiteLlmProvider::new(&profile_config)?)),
         }
     }
 

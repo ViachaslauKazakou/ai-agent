@@ -104,7 +104,7 @@ pub enum ReplCommand {
     Index(Option<String>),
     Search(String),
     /// Показать модели, доступные через LLM endpoint.
-    Models,
+    Models(Option<String>),
     Agents,
     Agent(Option<String>),
     /// Показать или выбрать рабочую роль (alias для `/agent`).
@@ -154,7 +154,7 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
         "/index" => ReplCommand::Index((!argument.is_empty()).then(|| argument.to_owned())),
         "/search" if !argument.is_empty() => ReplCommand::Search(argument.to_owned()),
         "/search" => ReplCommand::Unknown(input.to_owned()),
-        "/models" => ReplCommand::Models,
+        "/models" => ReplCommand::Models((!argument.is_empty()).then(|| argument.to_owned())),
         "/agents" => ReplCommand::Agents,
         "/agent" => ReplCommand::Agent((!argument.is_empty()).then(|| argument.to_owned())),
         "/role" => ReplCommand::Role((!argument.is_empty()).then(|| argument.to_owned())),
@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(parse_repl_command("/help"), ReplCommand::Help);
         assert_eq!(parse_repl_command("/exit"), ReplCommand::Quit);
         assert_eq!(parse_repl_command("/quit"), ReplCommand::Quit);
-        assert_eq!(parse_repl_command("/models"), ReplCommand::Models);
+        assert_eq!(parse_repl_command("/models"), ReplCommand::Models(None));
         assert_eq!(
             parse_repl_command("/role secretary"),
             ReplCommand::Role(Some("secretary".to_owned()))

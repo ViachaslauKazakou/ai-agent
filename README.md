@@ -37,7 +37,7 @@
 - provider-neutral CI MVP: `ci_status` и `ci_failure_analysis` для GitHub Actions/GitLab CI/Jenkins;
 - unit-, integration- и HTTP-клиентские тесты.
 - REPL с history, навигацией стрелками, Home/End, Ctrl-R и многострочным вводом через `\\`.
-- `/model` без аргумента открывает интерактивный picker доступных моделей с выбором стрелками и Enter; выбранная модель сохраняется в `.aiagent/config.json`.
+- `/model` без аргумента открывает интерактивный picker всех моделей, сгруппированных по провайдерам; выбранные provider и model сохраняются в `.aiagent/config.json`.
 - После coding-задач агент автоматически выводит структурированный итог: изменённые файлы, проверки и оставшиеся проблемы.
 - read-only calendar tool `list_calendar_events` for Google Calendar and macOS Calendar;
 - встроенные MCP tools `mcp_read_local_file` и `mcp_web_search`;
@@ -59,14 +59,99 @@ ai-agent --init
 # или просто ai-agent — инициализация выполняется автоматически
 ```
 
-При первом запуске создаются `.aiagent/config.json`, `.aiagent/agents/default.toml`,
+При первом запуске или при запуске с `--init` агент проверяет наличие
+`.aiagent/config.json` и `.aiagent/providers.json`. Если одного из файлов нет,
+он создаётся без перезаписи второго файла. Также создаются `.aiagent/agents/default.toml`,
 `.aiagent/skills/testing/SKILL.md` и `.aiagent/checkpoints/`. `.aiagent/config.json`
 создаётся из `.env`, затем `.env.example`, а если этих файлов нет — из встроенного
-безопасного шаблона. Существующие файлы не перезаписываются.
+безопасного шаблона. Команда `--init` идемпотентна и может использоваться для
+восстановления отсутствующего runtime-конфига.
 
 После создания JSON является основным источником runtime-настроек; CLI-параметры
 имеют наивысший приоритет. Секреты не выводятся в логах и `--verbose`, а
-`.aiagent/config.json` исключён из Git через `.gitignore`.
+`.aiagent/config.json` и `.aiagent/providers.json` исключены из Git через `.gitignore`.
+
+`config.json` содержит `default_provider`, `model` и настройки агента. Поля
+`api_base_url` и `api_key` в нём не используются: credentials, URL и список моделей
+находятся отдельно в `providers.json`. Формат провайдера единый для
+LiteLLM, Ollama и любого OpenAI-compatible API:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-...",
+      "models": ["gpt-4o-mini", "gpt-4o"]
+    }
+  }
+}
+```
+
+### Как добавить нового провайдера
+
+Например, чтобы добавить OpenAI, откройте `.aiagent/providers.json` и добавьте
+новую запись в объект `providers`:
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "kind": "ollama",
+      "base_url": "http://localhost:11434/v1",
+      "api_key": null,
+      "models": []
+    },
+    "openai": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-your-openai-key",
+      "models": [
+        "gpt-4o-mini",
+        "gpt-4o"
+      ]
+    }
+  }
+}
+```
+
+Затем укажите его как провайдера по умолчанию в `.aiagent/config.json`:
+
+```json
+{
+  "default_provider": "openai",
+  "model": "gpt-4o-mini",
+  "working_dir": "."
+}
+```
+
+После запуска агента проверьте и переключите провайдера из REPL:
+
+```text
+/models          показать настроенные провайдеры и модели
+/models openai   переключиться на OpenAI без перезапуска
+/model           выбрать модель из endpoint OpenAI
+```
+
+Любой сервис с OpenAI-compatible API добавляется таким же способом: замените
+имя записи, `base_url`, ключ и список моделей. Для провайдера, который не
+требует ключа, используйте `"api_key": null`. Если `models` оставить пустым,
+агент запросит доступные модели у endpoint через `GET /models`.
+
+Не добавляйте реальные API keys в Git. Файл `.aiagent/providers.json` уже
+исключён из Git, но также рекомендуется ограничить права доступа к нему:
+
+```bash
+chmod 600 .aiagent/providers.json
+```
+
+Ключи не отображаются в `/config`. Во время REPL `/models` показывает провайдеров
+и их модели, а `/models openai` переключает провайдера без перезапуска. Команда
+`/model` открывает общий picker с группировкой `provider / model`. Поле `models`
+позволяет заранее задать каталог; если оно пустое, список запрашивается через
+`GET /models`. Такая модель registry оставляет место для будущего routing по ролям
+задач: например, дешёвая модель для планирования и сильная для сложного coding loop.
 
 Если в `.aiagent/config.json` оставлена модель `demo-model`, при запуске Ollama агент
 получает список `/models`, выбирает доступную модель с приоритетом `coder`,
@@ -413,7 +498,8 @@ ai-agent
 /tools         показать состояние tools
 /tools log     показать краткий audit log вызовов tools
 /tools on|off  включить или выключить tools для следующих запросов
-/models        получить список моделей endpoint
+/models        получить модели текущего endpoint
+/models NAME   переключить провайдер без перезапуска
 /agents        показать project-local профили
 /agent         показать текущий профиль
 /agent NAME    переключить профиль

@@ -18,7 +18,6 @@ fn public_config_api_uses_environment_values() {
 
     assert_eq!(config.model, "env-model");
     assert_eq!(config.provider, "litellm");
-    assert_eq!(config.api_base_url, "http://localhost/v1");
 }
 
 #[test]
@@ -46,7 +45,7 @@ fn public_config_api_formats_readable_json_without_api_key() {
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
 
     assert_eq!(value["provider"], "litellm");
-    assert_eq!(value["api_key"], "<redacted>");
+    assert!(value.get("api_key").is_none());
     assert!(!json.contains("secret-value"));
     assert!(json.contains("\n"));
 }
