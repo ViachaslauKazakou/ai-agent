@@ -76,6 +76,12 @@ ai-agent --init
 находятся отдельно в `providers.json`. Формат провайдера единый для
 LiteLLM, Ollama и любого OpenAI-compatible API:
 
+Уровень reasoning по умолчанию — `medium`. Его можно изменить в `config.json`
+(`none`, `low`, `medium`, `high`) или во время REPL командами `/effort` и
+`/effort high`. Для запросов с function tools агент автоматически использует
+`reasoning_effort: none`, поскольку Chat Completions некоторых LiteLLM-моделей
+не поддерживает reasoning вместе с tools.
+
 ```json
 {
   "providers": {

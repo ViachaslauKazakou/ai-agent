@@ -18,6 +18,7 @@ fn public_config_api_uses_environment_values() {
 
     assert_eq!(config.model, "env-model");
     assert_eq!(config.provider, "litellm");
+    assert_eq!(config.reasoning_effort, "medium");
 }
 
 #[test]

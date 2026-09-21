@@ -31,6 +31,7 @@ fn public_repl_parser_supports_session_commands() {
     );
     assert_eq!(parse_repl_command("/quit"), ReplCommand::Quit);
     assert_eq!(parse_repl_command("/models"), ReplCommand::Models(None));
+    assert_eq!(parse_repl_command("/effort"), ReplCommand::Effort(None));
     assert_eq!(parse_repl_command("/model"), ReplCommand::Model(None));
     assert_eq!(
         parse_repl_command("/stats off"),

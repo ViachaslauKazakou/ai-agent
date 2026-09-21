@@ -12,6 +12,7 @@ const DEFAULT_BASE_URL: &str = "http://localhost:4000/v1";
 const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
 const DEFAULT_PROVIDER: &str = "litellm";
 const DEFAULT_MODEL: &str = "demo-model";
+pub const DEFAULT_REASONING_EFFORT: &str = "medium";
 const DEFAULT_MAX_TOOL_ROUNDS: usize = 20;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_LOG_LEVEL: &str = "info";
@@ -64,6 +65,7 @@ struct JsonConfig {
     #[serde(alias = "provider")]
     default_provider: Option<String>,
     model: Option<String>,
+    reasoning_effort: Option<String>,
     working_dir: Option<String>,
     max_tool_rounds: Option<usize>,
     request_timeout_secs: Option<u64>,
@@ -118,6 +120,7 @@ pub struct Config {
     pub api_key: Option<String>,
     /// Имя модели.
     pub model: String,
+    pub reasoning_effort: String,
     /// Абсолютная существующая рабочая директория.
     pub working_dir: PathBuf,
     /// Лимит будущих раундов инструментов.
@@ -158,6 +161,7 @@ impl fmt::Debug for Config {
             .field("provider", &self.provider)
             .field("providers", &self.providers.names().collect::<Vec<_>>())
             .field("model", &self.model)
+            .field("reasoning_effort", &self.reasoning_effort)
             .field("working_dir", &self.working_dir)
             .field("max_tool_rounds", &self.max_tool_rounds)
             .field("request_timeout_secs", &self.request_timeout_secs)
@@ -179,6 +183,7 @@ impl Config {
             "provider": self.provider,
             "default_provider": self.provider,
             "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
             "working_dir": self.working_dir,
             "max_tool_rounds": self.max_tool_rounds,
             "request_timeout_secs": self.request_timeout_secs,
@@ -228,6 +233,11 @@ impl Config {
                 config.default_provider.clone(),
             );
             set_if_some(&mut environment, "MODEL", config.model.clone());
+            set_if_some(
+                &mut environment,
+                "REASONING_EFFORT",
+                config.reasoning_effort.clone(),
+            );
             if let Some(working_dir) = &config.working_dir {
                 let path = PathBuf::from(working_dir);
                 let resolved = if path.is_absolute() {
@@ -323,6 +333,10 @@ impl Config {
     /// the separate providers registry.
     pub fn save_selection(&self, provider: &str, model: &str) -> Result<(), AppError> {
         persist_selection(&self.working_dir, provider, model)
+    }
+
+    pub fn save_reasoning_effort(&self, effort: &str) -> Result<(), AppError> {
+        persist_reasoning_effort(&self.working_dir, effort)
     }
 
     /// Собирает конфигурацию из defaults, переданного окружения и CLI.
@@ -421,6 +435,12 @@ impl Config {
             .clone()
             .or_else(|| environment.get("MODEL").cloned())
             .unwrap_or_else(|| DEFAULT_MODEL.to_owned());
+        let reasoning_effort = normalize_reasoning_effort(
+            environment
+                .get("REASONING_EFFORT")
+                .map(String::as_str)
+                .unwrap_or(DEFAULT_REASONING_EFFORT),
+        )?;
         let raw_working_dir = cli
             .working_dir
             .as_ref()
@@ -534,6 +554,7 @@ impl Config {
             api_base_url: base_url,
             api_key,
             model,
+            reasoning_effort,
             working_dir: resolved_working_dir,
             max_tool_rounds,
             request_timeout_secs,
@@ -630,6 +651,10 @@ pub fn initialize_project(project_dir: &Path) -> Result<bool, AppError> {
             .get("MODEL")
             .cloned()
             .or_else(|| Some(DEFAULT_MODEL.to_owned())),
+        reasoning_effort: values
+            .get("REASONING_EFFORT")
+            .cloned()
+            .or_else(|| Some(DEFAULT_REASONING_EFFORT.to_owned())),
         working_dir: Some(".".to_owned()),
         max_tool_rounds: values.get("MAX_TOOL_ROUNDS").and_then(|v| v.parse().ok()),
         request_timeout_secs: values
@@ -738,6 +763,26 @@ pub fn persist_selection(project_dir: &Path, provider: &str, model: &str) -> Res
     let data = serde_json::to_vec_pretty(&config)
         .map_err(|error| AppError::AgentConfig(error.to_string()))?;
     fs::write(path, data).map_err(|error| AppError::AgentConfig(error.to_string()))
+}
+
+pub fn persist_reasoning_effort(project_dir: &Path, effort: &str) -> Result<(), AppError> {
+    let normalized = normalize_reasoning_effort(effort)?;
+    let path = project_dir.join(PROJECT_CONFIG_PATH);
+    let mut config = load_json_config(&path)?.unwrap_or_default();
+    config.reasoning_effort = Some(normalized);
+    let data = serde_json::to_vec_pretty(&config)
+        .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    fs::write(path, data).map_err(|error| AppError::AgentConfig(error.to_string()))
+}
+
+pub fn normalize_reasoning_effort(value: &str) -> Result<String, AppError> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "none" | "low" | "medium" | "high" => Ok(normalized),
+        _ => Err(AppError::InvalidConfig(format!(
+            "недопустимый reasoning_effort: {value}; используйте none, low, medium или high"
+        ))),
+    }
 }
 
 fn load_json_config(path: &Path) -> Result<Option<JsonConfig>, AppError> {
@@ -1011,6 +1056,7 @@ mod tests {
         let config = Config::from_sources(&cli(&["--working-dir", "."]), &HashMap::new()).unwrap();
 
         assert_eq!(config.provider, "litellm");
+        assert_eq!(config.reasoning_effort, "medium");
         assert_eq!(config.model, "demo-model");
         assert_eq!(config.max_tool_rounds, 20);
         assert_eq!(config.request_timeout_secs, 120);

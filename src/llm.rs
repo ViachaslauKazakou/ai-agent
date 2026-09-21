@@ -164,6 +164,11 @@ pub struct CompletionRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Disables provider-side reasoning mode for tool calls. Some LiteLLM
+    /// model groups reject reasoning_effort together with Chat Completions
+    /// function tools unless it is explicitly set to `none`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 impl CompletionRequest {
@@ -175,6 +180,7 @@ impl CompletionRequest {
             tools: None,
             temperature: None,
             max_tokens: None,
+            reasoning_effort: None,
         }
     }
 
@@ -182,13 +188,20 @@ impl CompletionRequest {
         model: impl Into<String>,
         messages: Vec<LlmMessage>,
         tools: Vec<ToolDefinition>,
+        reasoning_effort: impl Into<String>,
     ) -> Self {
+        let has_tools = !tools.is_empty();
         Self {
             model: model.into(),
             messages,
             tools: (!tools.is_empty()).then_some(tools),
             temperature: None,
             max_tokens: None,
+            reasoning_effort: Some(if has_tools {
+                "none".to_owned()
+            } else {
+                reasoning_effort.into()
+            }),
         }
     }
 }
@@ -451,6 +464,26 @@ mod tests {
         assert_eq!(
             serde_json::to_value(request).unwrap()["messages"][0]["role"],
             "user"
+        );
+    }
+
+    #[test]
+    fn tool_requests_disable_reasoning_effort() {
+        let request = CompletionRequest::from_llm_messages(
+            "reasoning-model",
+            Vec::new(),
+            vec![super::ToolDefinition::function(
+                "test_tool",
+                "test",
+                json!({"type": "object"}),
+            )],
+            "high",
+        );
+
+        assert_eq!(request.reasoning_effort.as_deref(), Some("none"));
+        assert_eq!(
+            serde_json::to_value(request).unwrap()["reasoning_effort"],
+            "none"
         );
     }
 

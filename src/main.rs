@@ -629,6 +629,44 @@ async fn run_repl(
                     }
                 ),
             },
+            ReplCommand::Effort(setting) => {
+                let options = ["none", "low", "medium", "high"];
+                let selected = match setting {
+                    Some(value) => {
+                        if !options.contains(&value.as_str()) {
+                            println!(
+                                "Неизвестный effort: {value}. Используйте none, low, medium или high."
+                            );
+                            continue;
+                        }
+                        value
+                    }
+                    None => {
+                        let current = options
+                            .iter()
+                            .position(|value| *value == config.reasoning_effort)
+                            .unwrap_or(2);
+                        match Select::new()
+                            .with_prompt("Выберите reasoning effort (↑/↓, Enter)")
+                            .items(&options)
+                            .default(current)
+                            .interact_opt()
+                        {
+                            Ok(Some(index)) => options[index].to_owned(),
+                            Ok(None) => continue,
+                            Err(error) => {
+                                println!("Ошибка выбора effort: {error}");
+                                continue;
+                            }
+                        }
+                    }
+                };
+                if let Err(error) = config.save_reasoning_effort(&selected) {
+                    println!("Предупреждение: effort не сохранён: {error}");
+                } else {
+                    println!("Reasoning effort изменён: {selected}");
+                }
+            }
             ReplCommand::Compact => {
                 let messages = session
                     .messages()
@@ -1095,7 +1133,8 @@ async fn request_completion(
             Some(Duration::from_secs(config.max_loop_seconds)),
             config.max_diff_bytes,
         )
-        .with_tools_enabled(tools_enabled);
+        .with_tools_enabled(tools_enabled)
+        .with_reasoning_effort(config.reasoning_effort.clone());
     let started = Instant::now();
     println!("\n\x1b[2m┌─ Вы запрашиваете\x1b[0m");
     println!("\x1b[2m│\x1b[0m {prompt}");
