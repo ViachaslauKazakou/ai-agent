@@ -211,7 +211,7 @@ async fn select_model(
 
 async fn choose_model(
     config: &Config,
-    profile: &AgentProfile,
+    _profile: &AgentProfile,
     current: &str,
 ) -> Result<Option<(String, String)>, ai_agent::AppError> {
     let mut choices = Vec::new();
@@ -223,22 +223,10 @@ async fn choose_model(
                 .cloned()
                 .map(|model| (provider_name.clone(), model)),
         );
-        if provider_config.models.is_empty() {
-            let mut provider_profile = profile.clone();
-            provider_profile.provider = provider_name.clone();
-            let runtime_provider = ConfiguredProvider::new(config, &provider_profile)?;
-            choices.extend(
-                runtime_provider
-                    .list_models()
-                    .await?
-                    .into_iter()
-                    .map(|model| (provider_name.clone(), model.id)),
-            );
-        }
     }
     if choices.is_empty() {
         return Err(ai_agent::AppError::LlmResponse(
-            "в providers.json и endpoint не найдено доступных моделей".to_owned(),
+            "в providers.json не задано доступных моделей".to_owned(),
         ));
     }
     let labels = choices
