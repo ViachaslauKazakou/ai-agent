@@ -22,7 +22,7 @@ pub mod security_review;
 pub mod tools;
 pub mod word_processing;
 
-pub use config::Config;
+pub use config::{Config, ProviderConfig, ProviderRegistry};
 pub use domain::{Message, Role, Session, ToolCallMessage};
 pub use error::AppError;
 pub use llm::{

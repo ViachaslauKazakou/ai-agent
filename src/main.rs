@@ -134,7 +134,7 @@ async fn main() {
         };
     active_profile.model = model.clone();
     if cli.model.is_some()
-        && let Err(error) = config.save_model(&model)
+        && let Err(error) = config.save_selection(&active_profile.provider, &model)
     {
         eprintln!("Предупреждение: модель не сохранена в config.json: {error}");
     }
@@ -204,28 +204,38 @@ async fn select_model(
         .ok_or_else(|| {
             ai_agent::AppError::LlmResponse("провайдер не вернул доступных моделей".to_owned())
         })?;
-    config.save_model(selected)?;
+    config.save_selection(&profile.provider, selected)?;
     println!("Автоматически выбрана доступная модель: {selected}");
     Ok((provider, selected.to_owned()))
 }
 
 async fn choose_model(
-    provider: &ConfiguredProvider,
+    config: &Config,
+    _profile: &AgentProfile,
     current: &str,
-) -> Result<Option<String>, ai_agent::AppError> {
-    let models = provider.list_models().await?;
-    if models.is_empty() {
+) -> Result<Option<(String, String)>, ai_agent::AppError> {
+    let mut choices = Vec::new();
+    for (provider_name, provider_config) in &config.providers.providers {
+        choices.extend(
+            provider_config
+                .models
+                .iter()
+                .cloned()
+                .map(|model| (provider_name.clone(), model)),
+        );
+    }
+    if choices.is_empty() {
         return Err(ai_agent::AppError::LlmResponse(
-            "провайдер не вернул доступных моделей".to_owned(),
+            "в providers.json не задано доступных моделей".to_owned(),
         ));
     }
-    let labels = models
+    let labels = choices
         .iter()
-        .map(|model| model.id.clone())
+        .map(|(provider, model)| format!("{provider} / {model}"))
         .collect::<Vec<_>>();
     let initial = labels
         .iter()
-        .position(|model| model == current)
+        .position(|label| label.ends_with(&format!(" / {current}")))
         .unwrap_or(0);
     let selection = Select::new()
         .with_prompt("Выберите модель (↑/↓, Enter)")
@@ -233,7 +243,7 @@ async fn choose_model(
         .default(initial)
         .interact_opt()
         .map_err(|error| ai_agent::AppError::Tool(format!("model picker: {error}")))?;
-    Ok(selection.map(|index| labels[index].clone()))
+    Ok(selection.map(|index| choices[index].clone()))
 }
 
 async fn run_scheduler(
@@ -376,16 +386,45 @@ async fn run_repl(
                     "Неизвестный режим tools: {value}. Используйте /tools on или /tools off."
                 ),
             },
-            ReplCommand::Models => match provider.list_models().await {
-                Ok(models) if models.is_empty() => println!("Доступные модели не найдены."),
-                Ok(models) => {
-                    println!("Доступные модели:");
-                    for model in models {
-                        println!("- {}", model.id);
+            ReplCommand::Models(provider_name) => {
+                if let Some(name) = provider_name {
+                    if !config.providers.providers.contains_key(&name) {
+                        println!("Неизвестный провайдер: {name}");
+                        continue;
+                    }
+                    active_profile.provider = name.clone();
+                    match ConfiguredProvider::new(config, &active_profile) {
+                        Ok(new_provider) => {
+                            provider = new_provider;
+                            if let Err(error) = config.save_selection(&name, session.model()) {
+                                println!(
+                                    "Предупреждение: провайдер изменён, но не сохранён: {error}"
+                                );
+                            }
+                            println!(
+                                "Активный провайдер: {name}. Используйте /model для выбора модели."
+                            );
+                        }
+                        Err(error) => println!("Ошибка провайдера: {error}"),
+                    }
+                } else {
+                    for (name, provider_config) in &config.providers.providers {
+                        println!("Провайдер: {name} ({})", provider_config.kind);
+                        for model in &provider_config.models {
+                            println!("  - {model} (config)");
+                        }
+                    }
+                    match provider.list_models().await {
+                        Ok(models) if models.is_empty() => println!("Доступные модели не найдены."),
+                        Ok(models) => {
+                            for model in models {
+                                println!("- {}", model.id);
+                            }
+                        }
+                        Err(error) => println!("Ошибка получения моделей: {error}"),
                     }
                 }
-                Err(error) => println!("Ошибка получения моделей: {error}"),
-            },
+            }
             ReplCommand::Agents => {
                 for profile in catalog.profiles() {
                     println!("- {}: {}", profile.name, profile.description);
@@ -530,7 +569,7 @@ async fn run_repl(
             ReplCommand::Model(Some(model)) => match session.set_model(model.clone()) {
                 Ok(()) => {
                     active_profile.model = model.clone();
-                    if let Err(error) = config.save_model(&model) {
+                    if let Err(error) = config.save_selection(&active_profile.provider, &model) {
                         println!("Предупреждение: модель изменена, но не сохранена: {error}");
                     }
                     println!(
@@ -540,21 +579,35 @@ async fn run_repl(
                 }
                 Err(error) => println!("Ошибка модели: {error}"),
             },
-            ReplCommand::Model(None) => match choose_model(&provider, session.model()).await {
-                Ok(Some(model)) => {
-                    if let Err(error) = session.set_model(model.clone()) {
-                        println!("Ошибка модели: {error}");
-                    } else {
-                        active_profile.model = model.clone();
-                        if let Err(error) = config.save_model(&model) {
-                            println!("Предупреждение: модель изменена, но не сохранена: {error}");
+            ReplCommand::Model(None) => {
+                match choose_model(config, &active_profile, session.model()).await {
+                    Ok(Some((selected_provider, model))) => {
+                        if selected_provider != active_profile.provider {
+                            active_profile.provider = selected_provider.clone();
+                            match ConfiguredProvider::new(config, &active_profile) {
+                                Ok(new_provider) => provider = new_provider,
+                                Err(error) => {
+                                    println!("Ошибка переключения провайдера: {error}");
+                                    continue;
+                                }
+                            }
                         }
-                        println!("\x1b[32m✓\x1b[0m Модель изменена: \x1b[1m{}\x1b[0m", model);
+                        if let Err(error) = session.set_model(model.clone()) {
+                            println!("Ошибка модели: {error}");
+                        } else {
+                            active_profile.model = model.clone();
+                            if let Err(error) = config.save_selection(&selected_provider, &model) {
+                                println!(
+                                    "Предупреждение: модель изменена, но не сохранена: {error}"
+                                );
+                            }
+                            println!("\x1b[32m✓\x1b[0m Модель изменена: \x1b[1m{}\x1b[0m", model);
+                        }
                     }
+                    Ok(None) => {}
+                    Err(error) => println!("Ошибка получения моделей: {error}"),
                 }
-                Ok(None) => {}
-                Err(error) => println!("Ошибка получения моделей: {error}"),
-            },
+            }
             ReplCommand::Stats(setting) => match setting.as_deref() {
                 Some("on") => {
                     show_stats = true;
@@ -576,6 +629,44 @@ async fn run_repl(
                     }
                 ),
             },
+            ReplCommand::Effort(setting) => {
+                let options = ["none", "low", "medium", "high"];
+                let selected = match setting {
+                    Some(value) => {
+                        if !options.contains(&value.as_str()) {
+                            println!(
+                                "Неизвестный effort: {value}. Используйте none, low, medium или high."
+                            );
+                            continue;
+                        }
+                        value
+                    }
+                    None => {
+                        let current = options
+                            .iter()
+                            .position(|value| *value == config.reasoning_effort)
+                            .unwrap_or(2);
+                        match Select::new()
+                            .with_prompt("Выберите reasoning effort (↑/↓, Enter)")
+                            .items(&options)
+                            .default(current)
+                            .interact_opt()
+                        {
+                            Ok(Some(index)) => options[index].to_owned(),
+                            Ok(None) => continue,
+                            Err(error) => {
+                                println!("Ошибка выбора effort: {error}");
+                                continue;
+                            }
+                        }
+                    }
+                };
+                if let Err(error) = config.save_reasoning_effort(&selected) {
+                    println!("Предупреждение: effort не сохранён: {error}");
+                } else {
+                    println!("Reasoning effort изменён: {selected}");
+                }
+            }
             ReplCommand::Compact => {
                 let messages = session
                     .messages()
@@ -1042,7 +1133,8 @@ async fn request_completion(
             Some(Duration::from_secs(config.max_loop_seconds)),
             config.max_diff_bytes,
         )
-        .with_tools_enabled(tools_enabled);
+        .with_tools_enabled(tools_enabled)
+        .with_reasoning_effort(config.reasoning_effort.clone());
     let started = Instant::now();
     println!("\n\x1b[2m┌─ Вы запрашиваете\x1b[0m");
     println!("\x1b[2m│\x1b[0m {prompt}");
@@ -1216,34 +1308,59 @@ fn format_number(value: u32) -> String {
 
 #[derive(Clone)]
 enum ConfiguredProvider {
-    LiteLlm(LiteLlmProvider),
-    Ollama(OllamaProvider),
+    LiteLlm {
+        provider: LiteLlmProvider,
+        supports_reasoning_effort: bool,
+        supports_reasoning_with_tools: bool,
+        reasoning_effort_models: Vec<String>,
+        reasoning_with_tools_models: Vec<String>,
+    },
+    Ollama {
+        provider: OllamaProvider,
+        supports_reasoning_effort: bool,
+        supports_reasoning_with_tools: bool,
+        reasoning_effort_models: Vec<String>,
+        reasoning_with_tools_models: Vec<String>,
+    },
 }
 
 impl ConfiguredProvider {
     fn new(config: &Config, profile: &AgentProfile) -> Result<Self, ai_agent::AppError> {
         let mut profile_config = config.clone();
         profile_config.provider = profile.provider.clone();
-        if profile.provider == "ollama" && config.provider != "ollama" {
-            profile_config.api_base_url = "http://localhost:11434/v1".to_owned();
-            profile_config.api_key = None;
-        } else if profile.provider == "litellm" && config.provider != "litellm" {
-            profile_config.api_base_url = "http://localhost:4000/v1".to_owned();
-            profile_config.api_key = None;
-        }
-        match profile.provider.as_str() {
-            "litellm" => Ok(Self::LiteLlm(LiteLlmProvider::new(&profile_config)?)),
-            "ollama" => Ok(Self::Ollama(OllamaProvider::new(&profile_config)?)),
-            other => Err(ai_agent::AppError::InvalidConfig(format!(
-                "неподдерживаемый LLM_PROVIDER: {other}"
-            ))),
+        let provider = config
+            .providers
+            .provider(&profile.provider)
+            .ok_or_else(|| {
+                ai_agent::AppError::InvalidConfig(format!(
+                    "провайдер не найден: {}",
+                    profile.provider
+                ))
+            })?;
+        profile_config.api_base_url = provider.base_url.clone();
+        profile_config.api_key = provider.api_key.clone();
+        match provider.kind.as_str() {
+            "ollama" => Ok(Self::Ollama {
+                provider: OllamaProvider::new(&profile_config)?,
+                supports_reasoning_effort: provider.supports_reasoning_effort,
+                supports_reasoning_with_tools: provider.supports_reasoning_with_tools,
+                reasoning_effort_models: provider.reasoning_effort_models.clone(),
+                reasoning_with_tools_models: provider.reasoning_with_tools_models.clone(),
+            }),
+            _ => Ok(Self::LiteLlm {
+                provider: LiteLlmProvider::new(&profile_config)?,
+                supports_reasoning_effort: provider.supports_reasoning_effort,
+                supports_reasoning_with_tools: provider.supports_reasoning_with_tools,
+                reasoning_effort_models: provider.reasoning_effort_models.clone(),
+                reasoning_with_tools_models: provider.reasoning_with_tools_models.clone(),
+            }),
         }
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, ai_agent::AppError> {
         match self {
-            Self::LiteLlm(provider) => provider.list_models().await,
-            Self::Ollama(provider) => provider.list_models().await,
+            Self::LiteLlm { provider, .. } => provider.list_models().await,
+            Self::Ollama { provider, .. } => provider.list_models().await,
         }
     }
 }
@@ -1254,9 +1371,41 @@ impl LlmProvider for ConfiguredProvider {
         &self,
         request: ai_agent::CompletionRequest,
     ) -> Result<ai_agent::CompletionResponse, ai_agent::AppError> {
+        let mut request = request;
+        let (supports_effort, supports_tools, effort_models, tools_models) = match self {
+            Self::LiteLlm {
+                supports_reasoning_effort,
+                supports_reasoning_with_tools,
+                reasoning_effort_models,
+                reasoning_with_tools_models,
+                ..
+            }
+            | Self::Ollama {
+                supports_reasoning_effort,
+                supports_reasoning_with_tools,
+                reasoning_effort_models,
+                reasoning_with_tools_models,
+                ..
+            } => (
+                *supports_reasoning_effort,
+                *supports_reasoning_with_tools,
+                reasoning_effort_models,
+                reasoning_with_tools_models,
+            ),
+        };
+        let model_supports_effort =
+            supports_effort || effort_models.iter().any(|model| model == &request.model);
+        let model_supports_tools =
+            supports_tools || tools_models.iter().any(|model| model == &request.model);
+        if !model_supports_effort {
+            // `none` is the portable value accepted by LiteLLM gateways.
+            request.reasoning_effort = Some("none".to_owned());
+        } else if request.tools.is_some() && !model_supports_tools {
+            request.reasoning_effort = Some("none".to_owned());
+        }
         match self {
-            Self::LiteLlm(provider) => provider.complete(request).await,
-            Self::Ollama(provider) => provider.complete(request).await,
+            Self::LiteLlm { provider, .. } => provider.complete(request).await,
+            Self::Ollama { provider, .. } => provider.complete(request).await,
         }
     }
 }

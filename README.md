@@ -25,7 +25,7 @@
 - ограничение agent loop через `max_tool_rounds`;
 - coding-agent workflow с планом, малыми patch, проверками и итоговым summary;
 - лимиты loop по времени (`max_loop_seconds`) и размеру diff (`max_diff_bytes`);
-- автоматический выбор доступной Ollama-модели вместо `demo-model` с сохранением выбора в `.aiagent/config.json`;
+- автоматический выбор доступной модели вместо `demo-model` с сохранением выбора в `.aiagent/config.json`;
 - переключение tools во время REPL командами `/tools on` и `/tools off`;
 - project-local агенты в `.aiagent/agents/*.toml`;
 - project-local skills в `.aiagent/skills/<name>/SKILL.md`;
@@ -37,7 +37,7 @@
 - provider-neutral CI MVP: `ci_status` и `ci_failure_analysis` для GitHub Actions/GitLab CI/Jenkins;
 - unit-, integration- и HTTP-клиентские тесты.
 - REPL с history, навигацией стрелками, Home/End, Ctrl-R и многострочным вводом через `\\`.
-- `/model` без аргумента открывает интерактивный picker доступных моделей с выбором стрелками и Enter; выбранная модель сохраняется в `.aiagent/config.json`.
+- `/model` без аргумента открывает интерактивный picker всех моделей, сгруппированных по провайдерам; выбранные provider и model сохраняются в `.aiagent/config.json`.
 - После coding-задач агент автоматически выводит структурированный итог: изменённые файлы, проверки и оставшиеся проблемы.
 - read-only calendar tool `list_calendar_events` for Google Calendar and macOS Calendar;
 - встроенные MCP tools `mcp_read_local_file` и `mcp_web_search`;
@@ -59,19 +59,157 @@ ai-agent --init
 # или просто ai-agent — инициализация выполняется автоматически
 ```
 
-При первом запуске создаются `.aiagent/config.json`, `.aiagent/agents/default.toml`,
+При первом запуске или при запуске с `--init` агент проверяет наличие
+`.aiagent/config.json` и `.aiagent/providers.json`. Если одного из файлов нет,
+он создаётся без перезаписи второго файла. Также создаются `.aiagent/agents/default.toml`,
 `.aiagent/skills/testing/SKILL.md` и `.aiagent/checkpoints/`. `.aiagent/config.json`
 создаётся из `.env`, затем `.env.example`, а если этих файлов нет — из встроенного
-безопасного шаблона. Существующие файлы не перезаписываются.
+безопасного шаблона. Команда `--init` идемпотентна и может использоваться для
+восстановления отсутствующего runtime-конфига.
 
 После создания JSON является основным источником runtime-настроек; CLI-параметры
 имеют наивысший приоритет. Секреты не выводятся в логах и `--verbose`, а
-`.aiagent/config.json` исключён из Git через `.gitignore`.
+`.aiagent/config.json` и `.aiagent/providers.json` исключены из Git через `.gitignore`.
 
-Если в `.aiagent/config.json` оставлена модель `demo-model`, при запуске Ollama агент
-получает список `/models`, выбирает доступную модель с приоритетом `coder`,
-`qwen` или `llama`, а затем сохраняет её в `.aiagent/config.json`. Явная модель из CLI
-(`--model`) имеет приоритет и автоматически не заменяется.
+`config.json` содержит `default_provider`, `model`, `reasoning_effort` и настройки
+агента. Поля `api_base_url` и `api_key` в нём не используются: credentials, URL,
+список моделей и capabilities находятся отдельно в `providers.json`. Формат
+провайдера единый для LiteLLM, Ollama и любого OpenAI-compatible API.
+
+Пример `.aiagent/config.json`:
+
+```json
+{
+  "default_provider": "litellm",
+  "model": "gpt-oss:20b",
+  "reasoning_effort": "medium",
+  "working_dir": ".",
+  "max_tool_rounds": 20,
+  "request_timeout_secs": 120,
+  "log_level": "info"
+}
+```
+
+Уровень reasoning по умолчанию — `medium`. Его можно изменить в `config.json`
+(`none`, `low`, `medium`, `high`) или во время REPL командами `/effort` и
+`/effort high`. Поведение для function tools определяется capabilities
+конкретного провайдера: несовместимому endpoint отправляется
+`reasoning_effort: none`, а совместимый endpoint сохраняет выбранный уровень.
+
+```json
+{
+  "providers": {
+    "openai": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-...",
+      "models": ["gpt-4o-mini", "gpt-4o"],
+      "supports_reasoning_effort": true,
+      "supports_reasoning_with_tools": false,
+      "reasoning_effort_models": [],
+      "reasoning_with_tools_models": []
+    }
+  }
+}
+```
+
+### Как добавить нового провайдера
+
+Например, чтобы добавить OpenAI, откройте `.aiagent/providers.json` и добавьте
+новую запись в объект `providers`:
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "kind": "ollama",
+      "base_url": "http://localhost:11434/v1",
+      "api_key": null,
+      "models": ["llama3.2"],
+      "supports_reasoning_effort": false,
+      "supports_reasoning_with_tools": false,
+      "reasoning_effort_models": [],
+      "reasoning_with_tools_models": []
+    },
+    "openai": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-your-openai-key",
+      "models": [
+        "gpt-4o-mini",
+        "gpt-4o"
+      ],
+      "supports_reasoning_effort": true,
+      "supports_reasoning_with_tools": false,
+      "reasoning_effort_models": [],
+      "reasoning_with_tools_models": []
+    }
+  }
+}
+```
+
+Затем укажите его как провайдера по умолчанию в `.aiagent/config.json`:
+
+```json
+{
+  "default_provider": "openai",
+  "model": "gpt-4o-mini",
+  "working_dir": "."
+}
+```
+
+После запуска агента проверьте и переключите провайдера из REPL:
+
+```text
+/models          показать настроенные провайдеры и модели
+/models openai   переключиться на OpenAI без перезапуска
+/model           выбрать модель из endpoint OpenAI
+```
+
+Любой сервис с OpenAI-compatible API добавляется таким же способом: замените
+имя записи, `base_url`, ключ и список моделей. Для провайдера, который не
+требует ключа, используйте `"api_key": null`. Поле `models` — это allowlist:
+только перечисленные в нём модели появляются в picker `/model`. Если список
+пустой, `/model` не добавляет модели из endpoint; `/models` всё равно может
+показать модели, возвращённые текущим endpoint через `GET /models`.
+
+Для gateway, который поддерживает reasoning только для отдельных моделей,
+оставьте capability-флаги выключенными и укажите исключение по имени модели:
+
+```json
+{
+  "supports_reasoning_effort": false,
+  "supports_reasoning_with_tools": false,
+  "reasoning_effort_models": ["elite-gpt-5.6-luna"],
+  "reasoning_with_tools_models": ["elite-gpt-5.6-luna"]
+}
+```
+
+Это позволяет одному провайдеру безопасно обслуживать разные маршруты: прямой
+OpenAI-compatible endpoint получит `reasoning_effort: none` для tools, а Elite
+маршрут с той же моделью сможет сохранить выбранный effort. Если capability
+относится ко всем моделям провайдера, используйте `supports_*`; списки
+`*_models` добавляют точечные исключения.
+
+Не добавляйте реальные API keys в Git. Файл `.aiagent/providers.json` уже
+исключён из Git, но также рекомендуется ограничить права доступа к нему:
+
+```bash
+chmod 600 .aiagent/providers.json
+```
+
+Ключи не отображаются в `/config`. Во время REPL `/models` показывает настроенные
+провайдеры, их модели и список моделей текущего endpoint, а `/models openai`
+переключает провайдера без перезапуска. Команда `/model` открывает общий picker
+с группировкой `provider / model`; в picker попадают только модели, явно
+перечисленные в `providers.json`.
+Такая модель registry оставляет место для будущего routing по ролям
+задач: например, дешёвая модель для планирования и сильная для сложного coding loop.
+
+Если в `.aiagent/config.json` оставлена модель `demo-model`, при запуске агент
+получает список `/models` текущего endpoint, выбирает доступную модель с приоритетом
+`coder`, `qwen` или `llama`, а затем сохраняет её в `.aiagent/config.json`. Явная
+модель из CLI (`--model`) имеет приоритет и автоматически не заменяется.
 
 ## Работа с почтой
 
@@ -413,7 +551,8 @@ ai-agent
 /tools         показать состояние tools
 /tools log     показать краткий audit log вызовов tools
 /tools on|off  включить или выключить tools для следующих запросов
-/models        получить список моделей endpoint
+/models        получить модели текущего endpoint
+/models NAME   переключить провайдер без перезапуска
 /agents        показать project-local профили
 /agent         показать текущий профиль
 /agent NAME    переключить профиль
@@ -429,6 +568,8 @@ ai-agent
 /search QUERY  поиск по индексированным фрагментам
 /model         показать текущую модель
 /model NAME    изменить модель сессии
+/effort        выбрать reasoning effort
+/effort VALUE  установить none, low, medium или high
 /stats         показать настройки статистики
 /stats on|off  включить или выключить токены и время ответа
 /clear         очистить историю

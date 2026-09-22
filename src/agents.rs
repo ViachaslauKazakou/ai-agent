@@ -237,7 +237,9 @@ fn merge_profile(name: String, file: AgentFile, config: &Config) -> Result<Agent
     if profile.model.trim().is_empty() {
         return Err(AppError::EmptyModel);
     }
-    if profile.provider != "litellm" && profile.provider != "ollama" {
+    if !config.providers.providers.is_empty()
+        && config.providers.provider(&profile.provider).is_none()
+    {
         return Err(AppError::InvalidConfig(format!(
             "агент {} использует неподдерживаемый provider: {}",
             profile.name, profile.provider

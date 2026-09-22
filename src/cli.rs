@@ -104,7 +104,7 @@ pub enum ReplCommand {
     Index(Option<String>),
     Search(String),
     /// Показать модели, доступные через LLM endpoint.
-    Models,
+    Models(Option<String>),
     Agents,
     Agent(Option<String>),
     /// Показать или выбрать рабочую роль (alias для `/agent`).
@@ -115,6 +115,8 @@ pub enum ReplCommand {
     Model(Option<String>),
     /// Включить, выключить или показать статистику ответа.
     Stats(Option<String>),
+    /// Показать или выбрать reasoning effort.
+    Effort(Option<String>),
     Compact,
     CreateAgent(Option<String>),
     CreateSkill(Option<String>),
@@ -154,7 +156,7 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
         "/index" => ReplCommand::Index((!argument.is_empty()).then(|| argument.to_owned())),
         "/search" if !argument.is_empty() => ReplCommand::Search(argument.to_owned()),
         "/search" => ReplCommand::Unknown(input.to_owned()),
-        "/models" => ReplCommand::Models,
+        "/models" => ReplCommand::Models((!argument.is_empty()).then(|| argument.to_owned())),
         "/agents" => ReplCommand::Agents,
         "/agent" => ReplCommand::Agent((!argument.is_empty()).then(|| argument.to_owned())),
         "/role" => ReplCommand::Role((!argument.is_empty()).then(|| argument.to_owned())),
@@ -163,6 +165,7 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
         "/skill" => ReplCommand::Unknown(input.to_owned()),
         "/model" => ReplCommand::Model((!argument.is_empty()).then(|| argument.to_owned())),
         "/stats" => ReplCommand::Stats((!argument.is_empty()).then(|| argument.to_owned())),
+        "/effort" => ReplCommand::Effort((!argument.is_empty()).then(|| argument.to_owned())),
         "/compact" => ReplCommand::Compact,
         "/create-agent" => {
             ReplCommand::CreateAgent((!argument.is_empty()).then(|| argument.to_owned()))
@@ -176,7 +179,7 @@ pub fn parse_repl_command(input: &str) -> ReplCommand {
 
 /// Возвращает текст справки REPL.
 pub fn help_text() -> &'static str {
-    "Команды:\n  /help          показать эту справку\n  /status        показать состояние сессии\n  /tools         показать состояние и доступные tools\n  /tools on|off  включить/выключить tools для текущего запуска\n  /models        показать доступные модели\n  /agents        показать project-local агентов\n  /agent [NAME]  показать или выбрать агента\n  /role [NAME]   показать или выбрать рабочую роль\n  /create-agent  создать project-local агента через wizard\n  /skills        показать project-local skills\n  /skill NAME    выбрать skill агента\n  /create-skill  создать project-local skill через wizard\n  /config        показать конфигурацию\n  /permissions   показать permissions\n  /index         построить/обновить индекс проекта\n  /index status  показать состояние индекса\n  /search QUERY  поиск по индексированным фрагментам\n  /model         показать текущую модель\n  /model NAME    изменить имя модели\n  /stats         показать настройки статистики\n  /stats on|off  включить/выключить токены и время\n  /clear         очистить историю\n  /save, /load   сохранить/загрузить историю\n  /exit, /quit   выйти из REPL\n\nКонфигурация агентов и skills хранится в .aiagent/.\nЛюбой другой текст добавляется как сообщение пользователя."
+    "Команды:\n  /help          показать эту справку\n  /status        показать состояние сессии\n  /tools         показать состояние и доступные tools\n  /tools on|off  включить/выключить tools для текущего запуска\n  /models        показать доступные модели\n  /agents        показать project-local агентов\n  /agent [NAME]  показать или выбрать агента\n  /role [NAME]   показать или выбрать рабочую роль\n  /create-agent  создать project-local агента через wizard\n  /skills        показать project-local skills\n  /skill NAME    выбрать skill агента\n  /create-skill  создать project-local skill через wizard\n  /config        показать конфигурацию\n  /permissions   показать permissions\n  /index         построить/обновить индекс проекта\n  /index status  показать состояние индекса\n  /search QUERY  поиск по индексированным фрагментам\n  /model         показать текущую модель\n  /model NAME    изменить имя модели\n  /stats         показать настройки статистики\n  /stats on|off  включить/выключить токены и время\n  /effort        выбрать уровень reasoning\n  /clear         очистить историю\n  /save, /load   сохранить/загрузить историю\n  /exit, /quit   выйти из REPL\n\nКонфигурация агентов и skills хранится в .aiagent/.\nЛюбой другой текст добавляется как сообщение пользователя."
 }
 
 #[cfg(test)]
@@ -228,7 +231,11 @@ mod tests {
         assert_eq!(parse_repl_command("/help"), ReplCommand::Help);
         assert_eq!(parse_repl_command("/exit"), ReplCommand::Quit);
         assert_eq!(parse_repl_command("/quit"), ReplCommand::Quit);
-        assert_eq!(parse_repl_command("/models"), ReplCommand::Models);
+        assert_eq!(parse_repl_command("/models"), ReplCommand::Models(None));
+        assert_eq!(
+            parse_repl_command("/effort high"),
+            ReplCommand::Effort(Some("high".to_owned()))
+        );
         assert_eq!(
             parse_repl_command("/role secretary"),
             ReplCommand::Role(Some("secretary".to_owned()))

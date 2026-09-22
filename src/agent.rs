@@ -70,6 +70,7 @@ pub struct Agent<P> {
     max_elapsed: Option<Duration>,
     max_diff_bytes: usize,
     workflow_prompt: bool,
+    reasoning_effort: String,
 }
 
 impl<P: LlmProvider> Agent<P> {
@@ -90,6 +91,7 @@ impl<P: LlmProvider> Agent<P> {
             max_elapsed: None,
             max_diff_bytes: 100_000,
             workflow_prompt: true,
+            reasoning_effort: crate::config::DEFAULT_REASONING_EFFORT.to_owned(),
         }
     }
 
@@ -116,6 +118,11 @@ impl<P: LlmProvider> Agent<P> {
 
     pub fn with_workflow_prompt(mut self, enabled: bool) -> Self {
         self.workflow_prompt = enabled;
+        self
+    }
+
+    pub fn with_reasoning_effort(mut self, effort: String) -> Self {
+        self.reasoning_effort = effort;
         self
     }
 
@@ -180,6 +187,7 @@ impl<P: LlmProvider> Agent<P> {
                 } else {
                     Vec::new()
                 },
+                self.reasoning_effort.clone(),
             );
             self.context.set_tool_status(None);
             let response = match self.provider.complete(request).await {
