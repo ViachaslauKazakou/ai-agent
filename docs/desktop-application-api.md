@@ -30,6 +30,19 @@ Tauri IPC or a loopback browser transport.
 - `open_project`
 - `create_session`
 - `list_sessions`
+- `cancel_request`
+
+The `ApplicationService::execute` dispatcher validates each command, assigns a
+monotonic sequence number, and returns one `ApplicationEnvelope` containing the
+same request ID.  Project paths must exist before registration; sessions can
+only be created for registered projects.  This keeps basic validation in the
+shared service instead of duplicating it in a desktop or browser adapter.
+
+Workers use `RequestCancellation` as a cooperative flag.  A transport can
+register a request, pass the non-serializable handle to the async provider
+worker, and dispatch `cancel_request` later.  Providers and mutating tools must
+check the flag only at safe boundaries; forcibly aborting a write in the middle
+of a checkpoint transaction is not supported.
 
 The current stage manages project and session metadata only.  It intentionally
 does not claim to stream LLM output yet.  Streaming, cancellation, tool

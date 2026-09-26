@@ -5,10 +5,19 @@
 //! contract here gives every client the same vocabulary and prevents a UI from
 //! reaching into `Agent`, `Session`, or `ToolContext` internals.
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::AppError;
 
 /// Version of the command/event contract exchanged with external clients.
 ///
@@ -68,6 +77,8 @@ pub enum ApplicationCommand {
     CreateSession { project_id: String, model: String },
     /// Return sessions currently known to the service.
     ListSessions { project_id: String },
+    /// Request cancellation of an in-flight operation.
+    CancelRequest { request_id: Uuid },
 }
 
 /// Events emitted by the application service.
@@ -89,6 +100,8 @@ pub enum ApplicationEvent {
         project_id: String,
         sessions: Vec<SessionDto>,
     },
+    /// Confirms that cancellation was requested for an operation.
+    RequestCancelled { request_id: Uuid },
     /// Stable error event suitable for rendering in a client.
     Error { code: String, message: String },
 }
@@ -117,6 +130,34 @@ pub struct ApplicationService {
     projects: BTreeMap<String, ProjectDto>,
     sessions: BTreeMap<Uuid, SessionDto>,
     next_sequence: u64,
+    cancellations: BTreeMap<Uuid, RequestCancellation>,
+}
+
+/// Cooperative cancellation handle shared by a service and its async worker.
+///
+/// Cancellation is cooperative rather than forceful: an HTTP provider or a
+/// mutating tool must observe the flag at a safe boundary and stop there.  The
+/// design avoids aborting a write halfway through a checkpoint transaction.
+#[derive(Debug, Clone, Default)]
+pub struct RequestCancellation {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl RequestCancellation {
+    /// Creates a handle in the active state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Marks the operation as cancelled.
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    /// Returns whether the worker should stop at its next safe boundary.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
 }
 
 impl ApplicationService {
@@ -187,12 +228,95 @@ impl ApplicationService {
         self.next_sequence = self.next_sequence.saturating_add(1);
         self.next_sequence
     }
+
+    /// Registers a request and returns the handle that should be passed to its
+    /// provider/tool worker.  The handle is intentionally not serializable.
+    pub fn register_request(&mut self, request_id: Uuid) -> RequestCancellation {
+        let cancellation = RequestCancellation::new();
+        self.cancellations.insert(request_id, cancellation.clone());
+        cancellation
+    }
+
+    /// Marks a registered request as cancelled and reports whether it existed.
+    pub fn cancel_request(&self, request_id: Uuid) -> bool {
+        let Some(cancellation) = self.cancellations.get(&request_id) else {
+            return false;
+        };
+        cancellation.cancel();
+        true
+    }
+
+    /// Removes a completed request so cancellation state cannot accumulate.
+    pub fn finish_request(&mut self, request_id: Uuid) {
+        self.cancellations.remove(&request_id);
+    }
+
+    /// Executes one metadata command and returns exactly one correlated event.
+    ///
+    /// Keeping command dispatch in the service, instead of in a Tauri command
+    /// or HTTP handler, gives every frontend the same validation and event
+    /// semantics.  Later commands that start asynchronous agent work can use
+    /// the same request ID while emitting additional lifecycle events.
+    pub fn execute(
+        &mut self,
+        request_id: Uuid,
+        command: ApplicationCommand,
+    ) -> Result<ApplicationEnvelope<ApplicationEvent>, AppError> {
+        let event = match command {
+            ApplicationCommand::GetCapabilities => {
+                ApplicationEvent::Capabilities(self.capabilities())
+            }
+            ApplicationCommand::OpenProject { path } => {
+                if !path.is_dir() {
+                    return Err(AppError::InvalidWorkingDirectory(
+                        path.display().to_string(),
+                    ));
+                }
+                ApplicationEvent::ProjectOpened(self.open_project(path))
+            }
+            ApplicationCommand::CreateSession { project_id, model } => {
+                let session = self
+                    .create_session(&project_id, model)
+                    .map_err(AppError::InvalidConfig)?;
+                ApplicationEvent::SessionCreated(session)
+            }
+            ApplicationCommand::ListSessions { project_id } => {
+                if !self.projects.contains_key(&project_id) {
+                    return Err(AppError::InvalidConfig(format!(
+                        "project not found: {project_id}"
+                    )));
+                }
+                ApplicationEvent::SessionsListed {
+                    project_id: project_id.clone(),
+                    sessions: self.list_sessions(&project_id),
+                }
+            }
+            ApplicationCommand::CancelRequest { request_id } => {
+                if !self.cancel_request(request_id) {
+                    return Err(AppError::InvalidConfig(format!(
+                        "request not found: {request_id}"
+                    )));
+                }
+                ApplicationEvent::RequestCancelled { request_id }
+            }
+        };
+
+        Ok(ApplicationEnvelope {
+            api_version: APPLICATION_API_VERSION,
+            request_id,
+            sequence: self.next_sequence(),
+            payload: event,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{APPLICATION_API_VERSION, ApplicationCommand, ApplicationService};
+    use super::{
+        APPLICATION_API_VERSION, ApplicationCommand, ApplicationEvent, ApplicationService,
+    };
     use std::path::PathBuf;
+    use uuid::Uuid;
 
     #[test]
     fn command_serialization_is_stable_and_versioned() {
@@ -221,5 +345,48 @@ mod tests {
         let sessions = service.list_sessions(&first.id);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].model, "model-a");
+    }
+
+    #[test]
+    fn command_execution_returns_correlated_ordered_event() {
+        let mut service = ApplicationService::new();
+        let request_id = Uuid::new_v4();
+        let event = service
+            .execute(request_id, ApplicationCommand::GetCapabilities)
+            .unwrap();
+
+        assert_eq!(event.api_version, APPLICATION_API_VERSION);
+        assert_eq!(event.request_id, request_id);
+        assert_eq!(event.sequence, 1);
+        assert!(matches!(event.payload, ApplicationEvent::Capabilities(_)));
+    }
+
+    #[test]
+    fn opening_missing_project_is_rejected_before_registration() {
+        let mut service = ApplicationService::new();
+        let result = service.execute(
+            Uuid::new_v4(),
+            ApplicationCommand::OpenProject {
+                path: PathBuf::from("/path/that/does/not/exist"),
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(crate::AppError::InvalidWorkingDirectory(_))
+        ));
+    }
+
+    #[test]
+    fn cancellation_is_cooperative_and_removed_when_request_finishes() {
+        let mut service = ApplicationService::new();
+        let request_id = Uuid::new_v4();
+        let cancellation = service.register_request(request_id);
+
+        assert!(!cancellation.is_cancelled());
+        service.cancel_request(request_id);
+        assert!(cancellation.is_cancelled());
+        service.finish_request(request_id);
+        assert!(!service.cancel_request(request_id));
     }
 }
