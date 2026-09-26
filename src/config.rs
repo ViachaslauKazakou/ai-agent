@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{AppError, cli::Cli};
+use crate::{cli::Cli, AppError};
 
 const DEFAULT_BASE_URL: &str = "http://localhost:4000/v1";
 const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
@@ -333,7 +333,7 @@ impl Config {
                 load_file_config(&config_path)?
             };
         let mut cli = cli.clone();
-        if cli.working_dir.is_none() {
+        if cli.working_dir.is_none() && !environment.contains_key("WORKING_DIR") {
             cli.working_dir = Some(project_dir);
         }
         Self::from_sources_with_file(&cli, &environment, file, providers)
@@ -1072,7 +1072,7 @@ fn absolute_existing_directory(value: &str) -> Result<PathBuf, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentFileConfig, Config, FileConfig, ProviderRegistry, initialize_project};
+    use super::{initialize_project, AgentFileConfig, Config, FileConfig, ProviderRegistry};
     use crate::cli::Cli;
     use clap::Parser;
     use std::{collections::HashMap, path::Path};
@@ -1278,18 +1278,14 @@ mod tests {
         let mut environment = HashMap::new();
         environment.insert("GOOGLE_GMAIL_CLIENT_ID".to_owned(), "client".to_owned());
         let config = Config::from_sources(&cli, &environment).unwrap();
-        assert!(
-            config
-                .enabled_tools
-                .iter()
-                .any(|tool| tool == "list_recent_emails")
-        );
+        assert!(config
+            .enabled_tools
+            .iter()
+            .any(|tool| tool == "list_recent_emails"));
         assert!(config.enabled_tools.iter().any(|tool| tool == "get_email"));
-        assert!(
-            config
-                .enabled_tools
-                .iter()
-                .any(|tool| tool == "search_emails")
-        );
+        assert!(config
+            .enabled_tools
+            .iter()
+            .any(|tool| tool == "search_emails"));
     }
 }
