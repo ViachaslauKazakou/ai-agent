@@ -71,9 +71,9 @@ Then run:
 cd frontend
 npm install
 npm run check
-cd ..
-cargo check --manifest-path src-tauri/Cargo.toml
-cargo tauri dev --manifest-path src-tauri/Cargo.toml
+cargo check --manifest-path ../src-tauri/Cargo.toml
+cd ../src-tauri
+cargo tauri dev
 ```
 
 If the Tauri CLI is not installed, use `cargo install tauri-cli --version '^2'`
@@ -82,6 +82,6 @@ frontend is loaded from `frontend/`; no API keys are placed in the frontend or
 Tauri configuration. The first screen accepts an existing local directory;
 the backend rejects missing paths before registration.
 
-For a production package, use `cargo tauri build --manifest-path
-src-tauri/Cargo.toml` only after adding platform icons, signing identities and
-CI secrets through the target platform's secure release configuration.
+For a production package, run `cargo tauri build` from `src-tauri/` only after
+adding platform icons, signing identities and CI secrets through the target
+platform's secure release configuration.

@@ -66,9 +66,9 @@ application API, capabilities и регистрацию существующег
 cd frontend
 npm install
 npm run check
-cd ..
-cargo check --manifest-path src-tauri/Cargo.toml
-cargo tauri dev --manifest-path src-tauri/Cargo.toml
+cargo check --manifest-path ../src-tauri/Cargo.toml
+cd ../src-tauri
+cargo tauri dev
 ```
 
 Если команды `cargo tauri` нет, установите CLI версии 2:
