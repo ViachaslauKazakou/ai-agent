@@ -52,6 +52,36 @@
 
 ## Установка и инициализация проекта
 
+## Desktop-клиент (Tauri 2)
+
+В репозитории есть минимальный cross-platform desktop smoke-test клиента в
+`src-tauri/` с frontend в `frontend/`. На первом этапе он проверяет versioned
+application API, capabilities и регистрацию существующего project directory;
+полный streaming chat UI будет добавлен следующим этапом.
+
+Требуются Rust, Node.js и системные WebView-зависимости Tauri для вашей ОС.
+Запуск из корня репозитория:
+
+```bash
+cd frontend
+npm install
+npm run check
+cd ..
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo tauri dev --manifest-path src-tauri/Cargo.toml
+```
+
+Если команды `cargo tauri` нет, установите CLI версии 2:
+
+```bash
+cargo install tauri-cli --version '^2'
+```
+
+Для production package после настройки platform signing используйте
+`cargo tauri build --manifest-path src-tauri/Cargo.toml`. API keys и OAuth
+tokens не находятся во frontend или Tauri config; их обработка остаётся в
+Rust backend и OS credential storage.
+
 После установки бинарника командой `cargo install` его можно запускать из любой
 папки проекта:
 

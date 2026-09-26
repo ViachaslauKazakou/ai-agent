@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>AI Agent</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">LOCAL WORKSPACE</p>
+          <h1>AI Agent</h1>
+        </div>
+        <span id="status" class="status">Starting service…</span>
+      </header>
+
+      <section class="workspace">
+        <aside class="sidebar">
+          <div class="panel-heading">
+            <span>Project</span>
+            <button id="refresh" class="icon-button" type="button" title="Refresh capabilities">↻</button>
+          </div>
+          <label class="field-label" for="project-path">Project path</label>
+          <input id="project-path" type="text" value="." autocomplete="off" />
+          <button id="open-project" class="primary-button" type="button">Open project</button>
+          <div class="meta-card">
+            <span class="meta-label">API</span>
+            <strong id="api-version">—</strong>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Capabilities</span>
+            <strong id="capabilities">—</strong>
+          </div>
+        </aside>
+
+        <section class="chat-panel">
+          <div id="messages" class="messages" aria-live="polite">
+            <article class="message assistant">
+              <span class="message-label">SYSTEM</span>
+              <p>Open a local project to verify the desktop application service.</p>
+            </article>
+          </div>
+          <form id="composer" class="composer">
+            <input id="prompt" type="text" placeholder="Desktop API stage is metadata-only" disabled />
+            <button type="submit" disabled>Send</button>
+          </form>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

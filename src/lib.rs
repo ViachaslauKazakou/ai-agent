@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod agents;
+pub mod application;
 pub mod ci;
 pub mod cli;
 pub mod config;

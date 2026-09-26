@@ -1,0 +1,15 @@
+[package]
+name = "ai-agent-desktop"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+ai-agent = { path = ".." }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["sync"] }
+uuid = { version = "1", features = ["v4"] }
