@@ -8,7 +8,11 @@ const status = document.querySelector("#status");
 const pathInput = document.querySelector("#project-path");
 const apiVersion = document.querySelector("#api-version");
 const capabilities = document.querySelector("#capabilities");
+const modelInput = document.querySelector("#model");
+const createSessionButton = document.querySelector("#create-session");
+const session = document.querySelector("#session");
 const messages = document.querySelector("#messages");
+let activeProject;
 
 function requestId() {
   return crypto.randomUUID();
@@ -53,12 +57,29 @@ document.querySelector("#open-project").addEventListener("click", async () => {
       payload: { path: pathInput.value },
     });
     const project = envelope.payload;
+    activeProject = project;
+    createSessionButton.disabled = false;
     status.textContent = `Open: ${project.id}`;
     const item = document.createElement("article");
     item.className = "message assistant";
     item.innerHTML = `<span class="message-label">PROJECT</span><p></p>`;
     item.querySelector("p").textContent = `Registered ${project.path}`;
     messages.append(item);
+  } catch (error) {
+    showError(error);
+  }
+});
+
+createSessionButton.addEventListener("click", async () => {
+  if (!activeProject) return;
+  try {
+    const envelope = await execute({
+      type: "create_session",
+      payload: { project_id: activeProject.id, model: modelInput.value },
+    });
+    const created = envelope.payload;
+    session.textContent = `${created.model} · ${created.id.slice(0, 8)}`;
+    status.textContent = "Session ready";
   } catch (error) {
     showError(error);
   }

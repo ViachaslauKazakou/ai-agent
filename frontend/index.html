@@ -26,6 +26,9 @@
           <label class="field-label" for="project-path">Project path</label>
           <input id="project-path" type="text" value="." autocomplete="off" />
           <button id="open-project" class="primary-button" type="button">Open project</button>
+          <label class="field-label session-label" for="model">Model</label>
+          <input id="model" type="text" value="demo-model" autocomplete="off" />
+          <button id="create-session" class="secondary-button" type="button" disabled>Create session</button>
           <div class="meta-card">
             <span class="meta-label">API</span>
             <strong id="api-version">—</strong>
@@ -33,6 +36,10 @@
           <div class="meta-card">
             <span class="meta-label">Capabilities</span>
             <strong id="capabilities">—</strong>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Session</span>
+            <strong id="session">Not created</strong>
           </div>
         </aside>
 

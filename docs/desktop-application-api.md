@@ -28,6 +28,7 @@ Tauri IPC or a loopback browser transport.
 
 - `get_capabilities`
 - `open_project`
+- `list_projects`
 - `create_session`
 - `list_sessions`
 - `cancel_request`

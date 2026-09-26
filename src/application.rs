@@ -73,6 +73,8 @@ pub enum ApplicationCommand {
     GetCapabilities,
     /// Register a project path for later session commands.
     OpenProject { path: PathBuf },
+    /// Return projects already registered in this service instance.
+    ListProjects,
     /// Create a new empty session for an opened project.
     CreateSession { project_id: String, model: String },
     /// Return sessions currently known to the service.
@@ -93,6 +95,8 @@ pub enum ApplicationEvent {
     Capabilities(ApplicationCapabilities),
     /// Project was accepted and is ready for session creation.
     ProjectOpened(ProjectDto),
+    /// Projects currently registered in the service.
+    ProjectsListed { projects: Vec<ProjectDto> },
     /// A new session became available.
     SessionCreated(SessionDto),
     /// Current sessions for a project.
@@ -272,8 +276,14 @@ impl ApplicationService {
                         path.display().to_string(),
                     ));
                 }
-                ApplicationEvent::ProjectOpened(self.open_project(path))
+                let canonical = path.canonicalize().map_err(|error| {
+                    AppError::InvalidWorkingDirectory(format!("{}: {error}", path.display()))
+                })?;
+                ApplicationEvent::ProjectOpened(self.open_project(canonical))
             }
+            ApplicationCommand::ListProjects => ApplicationEvent::ProjectsListed {
+                projects: self.projects.values().cloned().collect(),
+            },
             ApplicationCommand::CreateSession { project_id, model } => {
                 let session = self
                     .create_session(&project_id, model)

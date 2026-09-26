@@ -21,6 +21,9 @@ h1 { margin: 5px 0 0; font-size: clamp(2.2rem, 6vw, 4.6rem); font-weight: 400; l
 input { width: 100%; border: 1px solid #4b6870; border-radius: 3px; padding: 11px; color: #e9f0f2; background: #142326; outline: none; }
 input:focus { border-color: #8eb9a7; }
 .primary-button { width: 100%; margin-top: 12px; border: 0; border-radius: 3px; padding: 12px; color: #102022; background: #8eb9a7; cursor: pointer; font-weight: 700; }
+.secondary-button { width: 100%; margin-top: 8px; border: 1px solid #8eb9a7; border-radius: 3px; padding: 10px; color: #b9d2c8; background: transparent; cursor: pointer; }
+.secondary-button:disabled { cursor: not-allowed; opacity: .45; }
+.session-label { margin-top: 22px; }
 .meta-card { margin-top: 34px; padding-top: 15px; border-top: 1px solid #38535a; }
 .meta-card + .meta-card { margin-top: 18px; }
 .meta-card strong { display: block; margin-top: 7px; color: #d9e5df; font-size: 0.9rem; font-weight: 400; }
