@@ -6,4 +6,6 @@ config.json
 target/
 src-tauri/target/
 src-tauri/gen/
+frontend/node_modules/
+frontend/package-lock.json
 client_secret_*.apps.googleusercontent.com.json
