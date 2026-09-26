@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{cli::Cli, AppError};
+use crate::{AppError, cli::Cli};
 
 const DEFAULT_BASE_URL: &str = "http://localhost:4000/v1";
 const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
@@ -14,6 +14,7 @@ const DEFAULT_PROVIDER: &str = "litellm";
 const DEFAULT_MODEL: &str = "demo-model";
 pub const DEFAULT_REASONING_EFFORT: &str = "medium";
 const DEFAULT_MAX_TOOL_ROUNDS: usize = 20;
+const DEFAULT_MAX_LOOP_SECONDS: u64 = 600;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_LOG_LEVEL: &str = "info";
 const JSON_CONFIG_FILE: &str = "config.json";
@@ -523,7 +524,9 @@ impl Config {
         });
         let command_allowlist = file_agent.command_allowlist.unwrap_or_default();
         let confirm_writes = file_agent.confirm_writes.unwrap_or(false);
-        let max_loop_seconds = file_agent.max_loop_seconds.unwrap_or(600);
+        let max_loop_seconds = file_agent
+            .max_loop_seconds
+            .unwrap_or(DEFAULT_MAX_LOOP_SECONDS);
         let max_diff_bytes = file_agent.max_diff_bytes.unwrap_or(100_000);
         let microsoft_graph_client_id = environment.get("MICROSOFT_GRAPH_CLIENT_ID").cloned();
         let microsoft_graph_tenant = environment.get("MICROSOFT_GRAPH_TENANT").cloned();
@@ -997,6 +1000,10 @@ fn validate_tools(tools: &[String], allow_write: bool) -> Result<(), AppError> {
                 | "get_email"
                 | "search_emails"
                 | "list_calendar_events"
+                | "github_repository"
+                | "github_issues"
+                | "github_issue"
+                | "github_pull_requests"
                 | "mcp_read_local_file"
                 | "mcp_web_search"
         ) {
@@ -1072,7 +1079,7 @@ fn absolute_existing_directory(value: &str) -> Result<PathBuf, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{initialize_project, AgentFileConfig, Config, FileConfig, ProviderRegistry};
+    use super::{AgentFileConfig, Config, FileConfig, ProviderRegistry, initialize_project};
     use crate::cli::Cli;
     use clap::Parser;
     use std::{collections::HashMap, path::Path};
@@ -1278,14 +1285,18 @@ mod tests {
         let mut environment = HashMap::new();
         environment.insert("GOOGLE_GMAIL_CLIENT_ID".to_owned(), "client".to_owned());
         let config = Config::from_sources(&cli, &environment).unwrap();
-        assert!(config
-            .enabled_tools
-            .iter()
-            .any(|tool| tool == "list_recent_emails"));
+        assert!(
+            config
+                .enabled_tools
+                .iter()
+                .any(|tool| tool == "list_recent_emails")
+        );
         assert!(config.enabled_tools.iter().any(|tool| tool == "get_email"));
-        assert!(config
-            .enabled_tools
-            .iter()
-            .any(|tool| tool == "search_emails"));
+        assert!(
+            config
+                .enabled_tools
+                .iter()
+                .any(|tool| tool == "search_emails")
+        );
     }
 }
