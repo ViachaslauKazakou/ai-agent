@@ -32,12 +32,17 @@ Tauri IPC or a loopback browser transport.
 - `create_session`
 - `list_sessions`
 - `cancel_request`
+- `list_models`
 
 The `ApplicationService::execute` dispatcher validates each command, assigns a
 monotonic sequence number, and returns one `ApplicationEnvelope` containing the
 same request ID.  Project paths must exist before registration; sessions can
 only be created for registered projects.  This keeps basic validation in the
 shared service instead of duplicating it in a desktop or browser adapter.
+
+Provider metadata is intentionally public but limited to registry names, kinds,
+and model identifiers. API keys, endpoint secrets, and OAuth credentials never
+cross the application boundary.
 
 Workers use `RequestCancellation` as a cooperative flag.  A transport can
 register a request, pass the non-serializable handle to the async provider

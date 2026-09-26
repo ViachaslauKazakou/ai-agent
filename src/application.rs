@@ -81,6 +81,8 @@ pub enum ApplicationCommand {
     ListSessions { project_id: String },
     /// Request cancellation of an in-flight operation.
     CancelRequest { request_id: Uuid },
+    /// Return configured provider names and their public model metadata.
+    ListModels,
 }
 
 /// Events emitted by the application service.
@@ -106,8 +108,21 @@ pub enum ApplicationEvent {
     },
     /// Confirms that cancellation was requested for an operation.
     RequestCancelled { request_id: Uuid },
+    /// Models available from the configured provider registry.
+    ModelsListed { providers: Vec<ProviderDto> },
     /// Stable error event suitable for rendering in a client.
     Error { code: String, message: String },
+}
+
+/// Public provider metadata safe to show in a frontend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderDto {
+    /// Registry key used by project profiles.
+    pub name: String,
+    /// Provider implementation kind, never its endpoint credentials.
+    pub kind: String,
+    /// Models declared in the project registry.
+    pub models: Vec<String>,
 }
 
 /// Envelope used to correlate a client command with emitted events.
@@ -133,6 +148,7 @@ pub struct ApplicationEnvelope<T> {
 pub struct ApplicationService {
     projects: BTreeMap<String, ProjectDto>,
     sessions: BTreeMap<Uuid, SessionDto>,
+    providers: Vec<ProviderDto>,
     next_sequence: u64,
     cancellations: BTreeMap<Uuid, RequestCancellation>,
 }
@@ -178,6 +194,15 @@ impl ApplicationService {
             cancellation: true,
             confirmations: true,
         }
+    }
+
+    /// Replaces public provider metadata loaded by the host configuration.
+    ///
+    /// Credentials are intentionally not accepted here; the host keeps them
+    /// inside provider implementations and exposes only names, kinds, and
+    /// model identifiers to a frontend.
+    pub fn set_providers(&mut self, providers: Vec<ProviderDto>) {
+        self.providers = providers;
     }
 
     /// Opens a project path and returns a process-local identifier.
@@ -309,6 +334,9 @@ impl ApplicationService {
                 }
                 ApplicationEvent::RequestCancelled { request_id }
             }
+            ApplicationCommand::ListModels => ApplicationEvent::ModelsListed {
+                providers: self.providers.clone(),
+            },
         };
 
         Ok(ApplicationEnvelope {

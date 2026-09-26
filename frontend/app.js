@@ -8,6 +8,7 @@ const status = document.querySelector("#status");
 const pathInput = document.querySelector("#project-path");
 const apiVersion = document.querySelector("#api-version");
 const capabilities = document.querySelector("#capabilities");
+const models = document.querySelector("#models");
 const modelInput = document.querySelector("#model");
 const createSessionButton = document.querySelector("#create-session");
 const session = document.querySelector("#session");
@@ -45,6 +46,11 @@ async function loadCapabilities() {
       value.confirmations ? "confirmations" : "read-only",
     ].join(" · ");
     status.textContent = "Service ready";
+    const modelEnvelope = await execute({ type: "list_models" });
+    const providerList = modelEnvelope.payload.providers;
+    models.textContent = providerList.length
+      ? providerList.flatMap((provider) => provider.models).join(" · ") || "registry providers"
+      : "not configured";
   } catch (error) {
     showError(error);
   }
