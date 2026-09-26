@@ -44,6 +44,13 @@ Provider metadata is intentionally public but limited to registry names, kinds,
 and model identifiers. API keys, endpoint secrets, and OAuth credentials never
 cross the application boundary.
 
+`open_project` now reuses the existing `Config::load` path. It canonicalizes the
+directory, initializes missing `.aiagent` project files through the existing
+configuration code, loads `providers.json`, and keeps the resulting `Config`
+private in the service. The frontend receives only `ProviderDto` metadata. This
+avoids a second desktop-specific configuration parser and keeps CLI and desktop
+configuration behavior aligned.
+
 Workers use `RequestCancellation` as a cooperative flag.  A transport can
 register a request, pass the non-serializable handle to the async provider
 worker, and dispatch `cancel_request` later.  Providers and mutating tools must

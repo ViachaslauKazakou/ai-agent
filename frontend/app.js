@@ -65,6 +65,11 @@ document.querySelector("#open-project").addEventListener("click", async () => {
     const project = envelope.payload;
     activeProject = project;
     createSessionButton.disabled = false;
+    const modelEnvelope = await execute({ type: "list_models" });
+    const providerList = modelEnvelope.payload.providers;
+    models.textContent = providerList.length
+      ? providerList.flatMap((provider) => provider.models).join(" · ") || "registry providers"
+      : "not configured";
     status.textContent = `Open: ${project.id}`;
     const item = document.createElement("article");
     item.className = "message assistant";

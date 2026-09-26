@@ -14,10 +14,11 @@ use std::{
     },
 };
 
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::AppError;
+use crate::{AppError, Config, ProviderRegistry, cli::Cli};
 
 /// Version of the command/event contract exchanged with external clients.
 ///
@@ -149,6 +150,8 @@ pub struct ApplicationService {
     projects: BTreeMap<String, ProjectDto>,
     sessions: BTreeMap<Uuid, SessionDto>,
     providers: Vec<ProviderDto>,
+    /// Project configuration remains private because it can contain secrets.
+    configs: BTreeMap<String, Config>,
     next_sequence: u64,
     cancellations: BTreeMap<Uuid, RequestCancellation>,
 }
@@ -203,6 +206,21 @@ impl ApplicationService {
     /// model identifiers to a frontend.
     pub fn set_providers(&mut self, providers: Vec<ProviderDto>) {
         self.providers = providers;
+    }
+
+    /// Loads project-local configuration through the existing Config loader.
+    ///
+    /// The service deliberately reuses the CLI configuration path instead of
+    /// implementing a second parser. Only safe provider metadata is copied to
+    /// the frontend-facing state; credentials stay inside `Config`.
+    pub fn load_project_config(&mut self, project: &ProjectDto) -> Result<(), AppError> {
+        let path = project.path.to_string_lossy().into_owned();
+        let cli = Cli::try_parse_from(["ai-agent", "--working-dir", path.as_str()])
+            .map_err(|error| AppError::InvalidConfig(error.to_string()))?;
+        let config = Config::load(&cli)?;
+        self.providers = public_providers(&config.providers);
+        self.configs.insert(project.id.clone(), config);
+        Ok(())
     }
 
     /// Opens a project path and returns a process-local identifier.
@@ -304,7 +322,9 @@ impl ApplicationService {
                 let canonical = path.canonicalize().map_err(|error| {
                     AppError::InvalidWorkingDirectory(format!("{}: {error}", path.display()))
                 })?;
-                ApplicationEvent::ProjectOpened(self.open_project(canonical))
+                let project = self.open_project(canonical);
+                self.load_project_config(&project)?;
+                ApplicationEvent::ProjectOpened(project)
             }
             ApplicationCommand::ListProjects => ApplicationEvent::ProjectsListed {
                 projects: self.projects.values().cloned().collect(),
@@ -346,6 +366,20 @@ impl ApplicationService {
             payload: event,
         })
     }
+}
+
+/// Converts private provider configuration into the credential-free DTO used
+/// by the desktop client.
+fn public_providers(registry: &ProviderRegistry) -> Vec<ProviderDto> {
+    registry
+        .providers
+        .iter()
+        .map(|(name, provider)| ProviderDto {
+            name: name.clone(),
+            kind: provider.kind.clone(),
+            models: provider.models.clone(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
