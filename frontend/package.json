@@ -1,0 +1,12 @@
+{
+  "name": "ai-agent-desktop-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "check": "node --check app.js"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0"
+  }
+}

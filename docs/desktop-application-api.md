@@ -54,3 +54,34 @@ The recommended desktop implementation is a Tauri 2 adapter over this API.
 The contract can also be exposed by a loopback-only WebSocket/REST adapter for
 a browser or PWA.  Such an adapter must add a per-launch authentication token,
 strict origin checks, bounded payloads, and must never bind to `0.0.0.0`.
+
+## Local desktop smoke test
+
+The repository now contains a minimal Tauri 2 shell in `src-tauri/` and a
+dependency-light frontend in `frontend/`. It is intentionally an API smoke
+test rather than a chat UI: it checks capabilities and registers an existing
+project path. LLM streaming is not presented as available until the next
+service stage implements it.
+
+Install the platform prerequisites from the Tauri documentation, including a
+Rust toolchain, Node.js, and the operating-system WebView development package.
+Then run:
+
+```bash
+cd frontend
+npm install
+npm run check
+cd ..
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo tauri dev --manifest-path src-tauri/Cargo.toml
+```
+
+If the Tauri CLI is not installed, use `cargo install tauri-cli --version '^2'`
+or invoke it through the project tooling used by your environment. The
+frontend is loaded from `frontend/`; no API keys are placed in the frontend or
+Tauri configuration. The first screen accepts an existing local directory;
+the backend rejects missing paths before registration.
+
+For a production package, use `cargo tauri build --manifest-path
+src-tauri/Cargo.toml` only after adding platform icons, signing identities and
+CI secrets through the target platform's secure release configuration.

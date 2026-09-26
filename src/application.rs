@@ -171,7 +171,7 @@ impl ApplicationService {
         ApplicationCapabilities {
             api_version: APPLICATION_API_VERSION,
             streaming: false,
-            cancellation: false,
+            cancellation: true,
             confirmations: true,
         }
     }
