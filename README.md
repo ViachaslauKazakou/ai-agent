@@ -19,6 +19,8 @@
 - checkpoint перед записью и `rollback_last_change` для отката;
 - запрет `.env`, credential/secret-файлов и секретов в содержимом;
 - Git workflow tools: status, diff, log, branch, commit, push и GitHub PR;
+- read-only GitHub connector для repository, issues, issue comments и pull requests;
+- GitHub authentication через `GITHUB_TOKEN` или локальный `gh auth token`;
 - commit, push и PR требуют явного интерактивного подтверждения;
 - подтверждение записи в интерактивном режиме через `confirm_writes`;
 - `run_command` работает только для команд из `command_allowlist`;
@@ -608,6 +610,10 @@ ai-agent
 | `git_commit` | commit с подтверждением |
 | `git_push` | push с подтверждением |
 | `git_create_pr` | GitHub PR через `gh` с подтверждением |
+| `github_repository` | метаданные GitHub repository |
+| `github_issues` | список GitHub issues с фильтром по state и лимитом |
+| `github_issue` | данные конкретной issue и её comments |
+| `github_pull_requests` | список GitHub pull requests с фильтром по state и лимитом |
 | `project_symbols` | поиск символов и определений |
 | `project_definition` | поиск references через Git |
 | `project_diagnostics` | read-only compiler/checker diagnostics |
@@ -617,6 +623,31 @@ ai-agent
 | `list_recent_emails` | заголовки и preview; `unread_only=true` фильтрует непрочитанные |
 | `search_emails` | поиск писем без загрузки тела |
 | `get_email` | загрузка полного тела письма по точному ID |
+
+GitHub tools работают в read-only режиме. Вызовам нужен repository в формате
+`owner/name`; инструмент использует GitHub API с timeout и ограничением количества
+результатов. Для authentication сначала проверяется `GITHUB_TOKEN`, затем токен,
+возвращённый командой `gh auth token`. Токен не записывается в конфигурацию,
+session history, tool results или диагностические сообщения.
+
+Пример настройки токена через окружение:
+
+```bash
+export GITHUB_TOKEN="ghp_..."
+ai-agent --working-dir .
+```
+
+Или выполните `gh auth login`, после чего connector сможет использовать локальную
+аутентификацию GitHub CLI. Для включения tools в project-local профиле добавьте их
+в `enabled_tools`:
+
+```toml
+enabled_tools = ["github_repository", "github_issues", "github_issue", "github_pull_requests"]
+```
+
+Содержимое issues, comments и pull requests считается внешними недоверенными
+данными: оно предназначено для чтения и анализа, но не является инструкцией для
+изменения файлов или выполнения команд.
 
 Команды `/create-agent`, `/create-skill` и `/role create` сохраняют файлы только в `.aiagent/`,
 не перезаписывают существующие сущности и отклоняют небезопасные имена. Wizard
