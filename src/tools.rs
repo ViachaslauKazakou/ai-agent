@@ -1339,6 +1339,10 @@ pub fn default_registry() -> Result<ToolRegistry, AppError> {
     registry.register(crate::connectors::tools::GetEmail)?;
     registry.register(crate::connectors::tools::SearchEmails)?;
     registry.register(crate::connectors::tools::ListCalendarEvents)?;
+    registry.register(crate::connectors::github::GitHubRepository)?;
+    registry.register(crate::connectors::github::GitHubIssues)?;
+    registry.register(crate::connectors::github::GitHubIssue)?;
+    registry.register(crate::connectors::github::GitHubPullRequests)?;
     registry.register(crate::mcp::McpTool::file_reader())?;
     registry.register(crate::mcp::McpTool::web_search())?;
     Ok(registry)
@@ -1385,6 +1389,14 @@ pub fn registry_from_names(names: &[String]) -> Result<ToolRegistry, AppError> {
             "search_emails" => registry.register(crate::connectors::tools::SearchEmails)?,
             "list_calendar_events" => {
                 registry.register(crate::connectors::tools::ListCalendarEvents)?
+            }
+            "github_repository" => {
+                registry.register(crate::connectors::github::GitHubRepository)?
+            }
+            "github_issues" => registry.register(crate::connectors::github::GitHubIssues)?,
+            "github_issue" => registry.register(crate::connectors::github::GitHubIssue)?,
+            "github_pull_requests" => {
+                registry.register(crate::connectors::github::GitHubPullRequests)?
             }
             "mcp_read_local_file" => registry.register(crate::mcp::McpTool::file_reader())?,
             "mcp_web_search" => registry.register(crate::mcp::McpTool::web_search())?,

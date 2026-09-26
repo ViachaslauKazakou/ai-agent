@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod calendar;
+pub mod github;
 pub mod gmail;
 pub mod gmail_auth;
 pub mod graph;
@@ -13,6 +14,7 @@ pub mod models;
 pub mod tools;
 
 pub use calendar::{CalendarEvent, GoogleCalendarClient};
+pub use github::{GitHostingProvider, GitHubProvider};
 pub use gmail::GmailMailClient;
 pub use graph::GraphMailClient;
 pub use models::{MessageQuery, NormalizedMessage, NormalizedThread, SourceKind};

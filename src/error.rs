@@ -57,6 +57,15 @@ pub enum AppError {
     #[error("Ошибка инструмента: {0}")]
     Tool(String),
 
+    #[error("GitHub authentication error: {0}")]
+    GithubAuth(String),
+
+    #[error("GitHub error: {0}")]
+    Github(String),
+
+    #[error("GitHub HTTP {status}: {message}")]
+    GithubHttp { status: u16, message: String },
+
     /// Запрошенный моделью инструмент не зарегистрирован.
     #[error("Неизвестный инструмент: {0}")]
     UnknownTool(String),
