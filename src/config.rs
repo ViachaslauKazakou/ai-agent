@@ -276,17 +276,53 @@ impl Config {
             }
         }
         if let Some(config) = &json {
-            set_if_some(
-                &mut environment,
-                "LLM_PROVIDER",
-                config.default_provider.clone(),
-            );
-            set_if_some(&mut environment, "MODEL", config.model.clone());
-            set_if_some(
-                &mut environment,
-                "REASONING_EFFORT",
-                config.reasoning_effort.clone(),
-            );
+            // JSON configuration is projected into the same environment map
+            // used by the existing merge logic. Keeping this mapping in one
+            // table makes adding a scalar setting less error-prone and keeps
+            // all ordinary string fields consistent.
+            let string_mappings: [(&str, fn(&JsonConfig) -> Option<String>); 14] = [
+                ("LLM_PROVIDER", |config| config.default_provider.clone()),
+                ("MODEL", |config| config.model.clone()),
+                ("REASONING_EFFORT", |config| config.reasoning_effort.clone()),
+                ("RUST_LOG", |config| config.log_level.clone()),
+                ("MICROSOFT_GRAPH_CLIENT_ID", |config| {
+                    config.microsoft_graph_client_id.clone()
+                }),
+                ("MICROSOFT_GRAPH_TENANT", |config| {
+                    config.microsoft_graph_tenant.clone()
+                }),
+                ("MICROSOFT_GRAPH_SCOPE", |config| {
+                    config.microsoft_graph_scope.clone()
+                }),
+                ("GOOGLE_GMAIL_CLIENT_ID", |config| {
+                    config.google_gmail_client_id.clone()
+                }),
+                ("GOOGLE_GMAIL_CLIENT_SECRET", |config| {
+                    config.google_gmail_client_secret.clone()
+                }),
+                ("GOOGLE_CALENDAR_CLIENT_ID", |config| {
+                    config.google_calendar_client_id.clone()
+                }),
+                ("GOOGLE_CALENDAR_CLIENT_SECRET", |config| {
+                    config.google_calendar_client_secret.clone()
+                }),
+                ("WEB_SEARCH_PROVIDER", |config| {
+                    config.web_search_provider.clone()
+                }),
+                ("WEB_SEARCH_ENDPOINT", |config| {
+                    config.web_search_endpoint.clone()
+                }),
+                ("WEB_SEARCH_API_KEY", |config| {
+                    config.web_search_api_key.clone()
+                }),
+            ];
+
+            for (environment_key, getter) in string_mappings {
+                set_if_some(&mut environment, environment_key, getter(config));
+            }
+
+            // `working_dir` is intentionally outside the table because a
+            // relative value must be resolved against the project directory.
             if let Some(working_dir) = &config.working_dir {
                 let path = PathBuf::from(working_dir);
                 let resolved = if path.is_absolute() {
@@ -299,57 +335,6 @@ impl Config {
                     resolved.to_string_lossy().into_owned(),
                 );
             }
-            set_if_some(&mut environment, "RUST_LOG", config.log_level.clone());
-            set_if_some(
-                &mut environment,
-                "MICROSOFT_GRAPH_CLIENT_ID",
-                config.microsoft_graph_client_id.clone(),
-            );
-            set_if_some(
-                &mut environment,
-                "MICROSOFT_GRAPH_TENANT",
-                config.microsoft_graph_tenant.clone(),
-            );
-            set_if_some(
-                &mut environment,
-                "MICROSOFT_GRAPH_SCOPE",
-                config.microsoft_graph_scope.clone(),
-            );
-            set_if_some(
-                &mut environment,
-                "GOOGLE_GMAIL_CLIENT_ID",
-                config.google_gmail_client_id.clone(),
-            );
-            set_if_some(
-                &mut environment,
-                "GOOGLE_GMAIL_CLIENT_SECRET",
-                config.google_gmail_client_secret.clone(),
-            );
-            set_if_some(
-                &mut environment,
-                "GOOGLE_CALENDAR_CLIENT_ID",
-                config.google_calendar_client_id.clone(),
-            );
-            set_if_some(
-                &mut environment,
-                "GOOGLE_CALENDAR_CLIENT_SECRET",
-                config.google_calendar_client_secret.clone(),
-            );
-            set_if_some(
-                &mut environment,
-                "WEB_SEARCH_PROVIDER",
-                config.web_search_provider.clone(),
-            );
-            set_if_some(
-                &mut environment,
-                "WEB_SEARCH_ENDPOINT",
-                config.web_search_endpoint.clone(),
-            );
-            set_if_some(
-                &mut environment,
-                "WEB_SEARCH_API_KEY",
-                config.web_search_api_key.clone(),
-            );
         }
 
         let config_path = cli

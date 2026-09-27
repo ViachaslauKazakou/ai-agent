@@ -1,4 +1,4 @@
-# Running via-agent 1.0.0
+# Running via-agent 1.0.1
 
 This guide explains how to configure and run both clients:
 
