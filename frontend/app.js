@@ -159,6 +159,14 @@ function showError(error) {
   messages.append(item);
 }
 
+function appendUserMessage(content) {
+  const item = document.createElement("article");
+  item.className = "message user-message";
+  item.innerHTML = `<span class="message-label">YOU</span><p></p>`;
+  item.querySelector("p").textContent = content;
+  messages.append(item);
+}
+
 function setThinking(value) {
   thinking.hidden = !value;
   if (value) status.textContent = "Agent is thinking…";
@@ -384,6 +392,8 @@ composer.addEventListener("submit", async (event) => {
   toolEvents.replaceChildren();
   startActivityPolling();
   logStep("send message", `${activeSession.id}: ${prompt}`);
+  appendUserMessage(prompt);
+  messages.scrollTop = messages.scrollHeight;
   try {
     const request = requestId();
     const envelope = await invoke("send_message", {
