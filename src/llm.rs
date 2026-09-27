@@ -172,11 +172,12 @@ pub struct CompletionRequest {
 }
 
 impl CompletionRequest {
-    /// LiteLLM/Bedrock reasoning deployments reject output limits below 16.
-    /// Supplying a conservative floor keeps the same request valid for local
-    /// Ollama and OpenAI-compatible gateways while avoiding provider-specific
-    /// minimum-token failures.
-    pub const MIN_PROVIDER_MAX_TOKENS: u32 = 16;
+    /// LiteLLM/Bedrock reasoning deployments reject output limits below 16, but
+    /// a tool-enabled turn also needs enough room for a complete function call
+    /// and its JSON arguments. A 256-token floor prevents the model from
+    /// returning an empty assistant message after spending the whole budget on
+    /// tool-call reasoning.
+    pub const MIN_PROVIDER_MAX_TOKENS: u32 = 256;
 
     /// Создаёт запрос из доменной истории сообщений.
     pub fn from_messages(model: impl Into<String>, messages: &[Message]) -> Self {
