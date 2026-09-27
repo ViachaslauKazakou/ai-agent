@@ -173,6 +173,7 @@ impl<P: LlmProvider> Agent<P> {
         let mut empty_response_retries = 0;
         let mut tool_parse_retries = 0;
         let mut last_mail_result: Option<String> = None;
+        let mut last_calendar_result: Option<String> = None;
         for round in 0..self.max_tool_rounds {
             if let Some(limit) = self.max_elapsed
                 && started.elapsed() > limit
@@ -248,6 +249,18 @@ impl<P: LlmProvider> Agent<P> {
                         });
                         continue;
                     }
+                    if let Some(calendar) = last_calendar_result {
+                        let content = format!(
+                            "Не удалось сформировать текстовый обзор после повторов модели. Ниже исходный результат календарного инструмента:\n\n{calendar}\n\nПроверьте события по этому результату."
+                        );
+                        session.add_message(Message::new(Role::Assistant, &content)?);
+                        return Ok(AgentResponse {
+                            content,
+                            tool_rounds: round,
+                            usage: has_usage.then_some(usage),
+                            summary,
+                        });
+                    }
                     if let Some(mail) = last_mail_result {
                         let content = format!(
                             "Не удалось сформировать текстовый обзор после повторов модели. Ниже исходный результат почтового инструмента:\n\n{mail}\n\nЧерновики ответов не подготовлены: модель вернула пустой ответ."
@@ -322,6 +335,9 @@ impl<P: LlmProvider> Agent<P> {
                             "list_recent_emails" | "get_email" | "search_emails"
                         ) {
                             last_mail_result = Some(result.content.clone());
+                        }
+                        if call.function.name == "list_calendar_events" {
+                            last_calendar_result = Some(result.content.clone());
                         }
                         if result.content.contains("diff") {
                             let size = result.content.len();
