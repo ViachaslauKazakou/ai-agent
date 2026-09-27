@@ -5,6 +5,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
+document.querySelector("#app-version").textContent = `via-agent v${__APP_VERSION__}`;
+
 if (typeof window.reportFrontendError === "function") {
   window.reportFrontendError = (error) => {
     const status = document.querySelector("#status");
@@ -411,7 +413,10 @@ composer.addEventListener("submit", async (event) => {
     activeSession.message_count += 2;
     status.textContent = `Completed · ${response.tool_rounds} tool round(s)`;
     logStep("agent completed", `${response.tool_rounds} tool round(s)`);
+    // Keep the submitted prompt in the conversation and clear only the draft
+    // composer for the next request.
     promptInput.value = "";
+    promptInput.style.height = "auto";
   } catch (error) {
     showError(error);
   } finally {

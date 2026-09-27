@@ -8,10 +8,10 @@ use ai_agent::application::{
     ApplicationCommand, ApplicationEnvelope, ApplicationEvent, ApplicationService,
     SettingsDocuments,
 };
+use std::sync::Arc;
 use tauri::State;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use std::sync::Arc;
 
 /// Shared service state owned by one desktop process.
 struct DesktopState(Mutex<ApplicationService>);
@@ -36,7 +36,10 @@ async fn execute_command(
     let result = service
         .execute(request_id, command)
         .map_err(|error| error.to_string());
-    eprintln!("[desktop] execute_command completed success={}", result.is_ok());
+    eprintln!(
+        "[desktop] execute_command completed success={}",
+        result.is_ok()
+    );
     result
 }
 
@@ -51,8 +54,8 @@ async fn refresh_models(
     project_id: String,
 ) -> Result<ApplicationEnvelope<ApplicationEvent>, String> {
     eprintln!("[desktop] refresh_models project_id={project_id} request_id={request_id}");
-    let request_id = Uuid::parse_str(&request_id)
-        .map_err(|error| format!("invalid request id: {error}"))?;
+    let request_id =
+        Uuid::parse_str(&request_id).map_err(|error| format!("invalid request id: {error}"))?;
     let mut service = state.0.lock().await;
     let providers = service
         .refresh_models(&project_id)
@@ -81,17 +84,20 @@ async fn send_message(
     session_id: String,
     prompt: String,
 ) -> Result<ApplicationEnvelope<ApplicationEvent>, String> {
-    let request_id = Uuid::parse_str(&request_id)
-        .map_err(|error| format!("invalid request id: {error}"))?;
-    let session_id = Uuid::parse_str(&session_id)
-        .map_err(|error| format!("invalid session id: {error}"))?;
+    let request_id =
+        Uuid::parse_str(&request_id).map_err(|error| format!("invalid request id: {error}"))?;
+    let session_id =
+        Uuid::parse_str(&session_id).map_err(|error| format!("invalid session id: {error}"))?;
     eprintln!("[desktop] send_message session_id={session_id} request_id={request_id}");
     let mut service = state.0.lock().await;
     let result = service
         .send_message_with_activity(request_id, session_id, &prompt, activity.0.clone())
         .await
         .map_err(|error| error.to_string());
-    eprintln!("[desktop] send_message completed success={}", result.is_ok());
+    eprintln!(
+        "[desktop] send_message completed success={}",
+        result.is_ok()
+    );
     result
 }
 
@@ -102,7 +108,9 @@ async fn read_settings(
     project_id: String,
 ) -> Result<SettingsDocuments, String> {
     let service = state.0.lock().await;
-    service.read_settings(&project_id).map_err(|error| error.to_string())
+    service
+        .read_settings(&project_id)
+        .map_err(|error| error.to_string())
 }
 
 /// Validates and atomically saves edited project settings.
