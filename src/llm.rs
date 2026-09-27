@@ -172,6 +172,12 @@ pub struct CompletionRequest {
 }
 
 impl CompletionRequest {
+    /// LiteLLM/Bedrock reasoning deployments reject output limits below 16.
+    /// Supplying a conservative floor keeps the same request valid for local
+    /// Ollama and OpenAI-compatible gateways while avoiding provider-specific
+    /// minimum-token failures.
+    pub const MIN_PROVIDER_MAX_TOKENS: u32 = 16;
+
     /// Создаёт запрос из доменной истории сообщений.
     pub fn from_messages(model: impl Into<String>, messages: &[Message]) -> Self {
         Self {
@@ -179,7 +185,7 @@ impl CompletionRequest {
             messages: messages.iter().map(LlmMessage::from_message).collect(),
             tools: None,
             temperature: None,
-            max_tokens: None,
+            max_tokens: Some(Self::MIN_PROVIDER_MAX_TOKENS),
             reasoning_effort: None,
         }
     }
@@ -195,7 +201,7 @@ impl CompletionRequest {
             messages,
             tools: (!tools.is_empty()).then_some(tools),
             temperature: None,
-            max_tokens: None,
+            max_tokens: Some(Self::MIN_PROVIDER_MAX_TOKENS),
             // The provider adapter downgrades this when its endpoint does not
             // support reasoning together with function tools.
             reasoning_effort: Some(reasoning_effort.into()),
@@ -461,6 +467,15 @@ mod tests {
         assert_eq!(
             serde_json::to_value(request).unwrap()["messages"][0]["role"],
             "user"
+        );
+    }
+
+    #[test]
+    fn requests_use_provider_safe_minimum_output_tokens() {
+        let request = CompletionRequest::from_messages("model", &[]);
+        assert_eq!(
+            request.max_tokens,
+            Some(CompletionRequest::MIN_PROVIDER_MAX_TOKENS)
         );
     }
 
