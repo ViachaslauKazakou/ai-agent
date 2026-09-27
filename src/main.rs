@@ -1398,10 +1398,12 @@ impl LlmProvider for ConfiguredProvider {
         let model_supports_tools =
             supports_tools || tools_models.iter().any(|model| model == &request.model);
         if !model_supports_effort {
-            // `none` is the portable value accepted by LiteLLM gateways.
-            request.reasoning_effort = Some("none".to_owned());
+            // Omit the field entirely. Some LiteLLM/Bedrock versions still
+            // inspect `reasoning_effort: none` and dereference a missing
+            // `thinking` object, returning an internal 400 error.
+            request.reasoning_effort = None;
         } else if request.tools.is_some() && !model_supports_tools {
-            request.reasoning_effort = Some("none".to_owned());
+            request.reasoning_effort = None;
         }
         match self {
             Self::LiteLlm { provider, .. } => provider.complete(request).await,

@@ -202,7 +202,7 @@ impl CompletionRequest {
             tools: (!tools.is_empty()).then_some(tools),
             temperature: None,
             max_tokens: Some(Self::MIN_PROVIDER_MAX_TOKENS),
-            // The provider adapter downgrades this when its endpoint does not
+            // Provider adapters remove this field when the endpoint does not
             // support reasoning together with function tools.
             reasoning_effort: Some(reasoning_effort.into()),
         }
