@@ -54,10 +54,10 @@
 
 ## Desktop-клиент (Tauri 2)
 
-В репозитории есть минимальный cross-platform desktop smoke-test клиента в
-`src-tauri/` с frontend в `frontend/`. На первом этапе он проверяет versioned
-application API, capabilities и регистрацию существующего project directory;
-полный streaming chat UI будет добавлен следующим этапом.
+В репозитории есть cross-platform desktop-клиент в `src-tauri/` с frontend в
+`frontend/`. Клиент открывает проект через native directory picker, загружает
+project-local configuration, показывает доступные модели, создаёт session и
+передаёт prompt существующему Rust Agent loop.
 
 Требуются Rust, Node.js и системные WebView-зависимости Tauri для вашей ОС.
 Запуск из корня репозитория:
@@ -66,7 +66,6 @@ application API, capabilities и регистрацию существующег
 cd frontend
 npm install
 npm run check
-cargo check --manifest-path ../src-tauri/Cargo.toml
 cd ../src-tauri
 cargo tauri dev
 ```

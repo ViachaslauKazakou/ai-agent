@@ -1,7 +1,7 @@
 # Desktop Application API
 
-This document describes the first transport-neutral layer for the desktop
-client planned in issue #6.
+This document describes the transport-neutral application layer and the current
+desktop client implementation for issue #6.
 
 ## Why this layer exists
 
@@ -34,6 +34,7 @@ Tauri IPC or a loopback browser transport.
 - `cancel_request`
 - `list_models`
 - `refresh_models`
+- `send_message`
 
 The `ApplicationService::execute` dispatcher validates each command, assigns a
 monotonic sequence number, and returns one `ApplicationEnvelope` containing the
@@ -64,9 +65,11 @@ worker, and dispatch `cancel_request` later.  Providers and mutating tools must
 check the flag only at safe boundaries; forcibly aborting a write in the middle
 of a checkpoint transaction is not supported.
 
-The current stage manages project and session metadata only.  It intentionally
-does not claim to stream LLM output yet.  Streaming, cancellation, tool
-lifecycle events, and confirmation requests are the next service-layer stage.
+The desktop client now supports the existing non-streaming Agent loop through
+`send_message`. The
+provider request/response is awaited by the async Tauri command and the final
+assistant DTO is returned to the UI. Streaming text, live tool lifecycle events,
+and confirmation requests remain the next service-layer stage.
 
 ## Frontend integration direction
 
@@ -77,11 +80,16 @@ strict origin checks, bounded payloads, and must never bind to `0.0.0.0`.
 
 ## Local desktop smoke test
 
-The repository now contains a minimal Tauri 2 shell in `src-tauri/` and a
-dependency-light frontend in `frontend/`. It is intentionally an API smoke
-test rather than a chat UI: it checks capabilities and registers an existing
-project path. LLM streaming is not presented as available until the next
-service stage implements it.
+The repository contains a Tauri 2 shell in `src-tauri/` and a dependency-light
+frontend in `frontend/`. The client opens a project, loads its configuration,
+refreshes provider models, creates a session, and sends prompts through the
+existing Agent loop. Responses are currently request/response based; streaming
+text and live tool lifecycle events remain a later stage.
+
+The desktop shell also provides a native directory picker through the Tauri
+dialog plugin. The selected path is still validated and canonicalized by the
+Rust application service; the picker does not grant the frontend direct file
+access or bypass project permissions.
 
 Install the platform prerequisites from the Tauri documentation, including a
 Rust toolchain, Node.js, and the operating-system WebView development package.
@@ -91,7 +99,6 @@ Then run:
 cd frontend
 npm install
 npm run check
-cargo check --manifest-path ../src-tauri/Cargo.toml
 cd ../src-tauri
 cargo tauri dev
 ```
@@ -99,8 +106,10 @@ cargo tauri dev
 If the Tauri CLI is not installed, use `cargo install tauri-cli --version '^2'`
 or invoke it through the project tooling used by your environment. The
 frontend is loaded from `frontend/`; no API keys are placed in the frontend or
-Tauri configuration. The first screen accepts an existing local directory;
-the backend rejects missing paths before registration.
+Tauri configuration. Choose a directory with the native `Choose...` button or
+enter an absolute path, then select `Open project`, create a session, and use
+the prompt field to send a request. The backend rejects missing paths before
+registration.
 
 For a production package, run `cargo tauri build` from `src-tauri/` only after
 adding platform icons, signing identities and CI secrets through the target

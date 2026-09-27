@@ -18,7 +18,12 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AppError, Config, LiteLlmProvider, OllamaProvider, ProviderRegistry, cli::Cli};
+use crate::{
+    AppError, Config, LiteLlmProvider, OllamaProvider, ProviderRegistry, Session,
+    agents::AgentCatalog,
+    cli::Cli,
+    tools::{ToolContext, registry_from_names},
+};
 
 /// Version of the command/event contract exchanged with external clients.
 ///
@@ -86,6 +91,8 @@ pub enum ApplicationCommand {
     ListModels,
     /// Query configured provider endpoints for their current model list.
     RefreshModels { project_id: String },
+    /// Start one prompt for an existing session.
+    SendMessage { session_id: Uuid, prompt: String },
 }
 
 /// Events emitted by the application service.
@@ -113,6 +120,16 @@ pub enum ApplicationEvent {
     RequestCancelled { request_id: Uuid },
     /// Models available from the configured provider registry.
     ModelsListed { providers: Vec<ProviderDto> },
+    /// Indicates that agent execution has started for a request.
+    RequestStarted { session_id: Uuid },
+    /// Final non-streaming assistant response.
+    AssistantMessage {
+        session_id: Uuid,
+        content: String,
+        tool_rounds: usize,
+    },
+    /// Tool status suitable for a UI timeline.
+    ToolStatus { session_id: Uuid, status: String },
     /// Stable error event suitable for rendering in a client.
     Error { code: String, message: String },
 }
@@ -149,15 +166,62 @@ pub struct ApplicationEnvelope<T> {
 /// added behind the same service boundary in the streaming/cancellation stage;
 /// keeping this state separate from a transport makes the design reusable for
 /// Tauri IPC, a loopback browser transport, and the existing CLI adapter.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct ApplicationService {
     projects: BTreeMap<String, ProjectDto>,
     sessions: BTreeMap<Uuid, SessionDto>,
     providers: Vec<ProviderDto>,
     /// Project configuration remains private because it can contain secrets.
     configs: BTreeMap<String, Config>,
+    /// Runtime agents are kept separate from DTO state and keyed by session.
+    agents: BTreeMap<Uuid, DesktopAgent>,
     next_sequence: u64,
     cancellations: BTreeMap<Uuid, RequestCancellation>,
+}
+
+/// Selects the configured provider implementation while keeping credentials
+/// inside the Rust client, exactly as the CLI does.
+fn desktop_provider(config: &Config, name: &str) -> Result<DesktopProvider, AppError> {
+    let provider = config
+        .providers
+        .provider(name)
+        .ok_or_else(|| AppError::InvalidConfig(format!("provider not found: {name}")))?;
+    let mut selected = config.clone();
+    selected.provider = name.to_owned();
+    selected.api_base_url = provider.base_url.clone();
+    selected.api_key = provider.api_key.clone();
+    match provider.kind.as_str() {
+        "ollama" => Ok(DesktopProvider::Ollama(OllamaProvider::new(&selected)?)),
+        _ => Ok(DesktopProvider::LiteLlm(LiteLlmProvider::new(&selected)?)),
+    }
+}
+
+/// Runtime state required to execute a session without exposing internals to
+/// the transport or frontend layers.
+struct DesktopAgent {
+    agent: crate::agent::Agent<DesktopProvider>,
+    session: Session,
+}
+
+/// Provider wrapper that applies project configuration and keeps provider
+/// selection reusable between CLI and desktop code.
+#[derive(Clone)]
+enum DesktopProvider {
+    LiteLlm(crate::LiteLlmProvider),
+    Ollama(crate::OllamaProvider),
+}
+
+#[async_trait::async_trait]
+impl crate::LlmProvider for DesktopProvider {
+    async fn complete(
+        &self,
+        request: crate::CompletionRequest,
+    ) -> Result<crate::CompletionResponse, AppError> {
+        match self {
+            Self::LiteLlm(provider) => provider.complete(request).await,
+            Self::Ollama(provider) => provider.complete(request).await,
+        }
+    }
 }
 
 /// Cooperative cancellation handle shared by a service and its async worker.
@@ -308,6 +372,94 @@ impl ApplicationService {
         Ok(session)
     }
 
+    /// Creates the runtime agent for a session using the same project-local
+    /// profile, tools, provider, and safety settings as the CLI.
+    fn initialize_agent(&mut self, session: &SessionDto) -> Result<(), AppError> {
+        let config = self
+            .configs
+            .get(&session.project_id)
+            .ok_or_else(|| {
+                AppError::InvalidConfig("project configuration is not loaded".to_owned())
+            })?
+            .clone();
+        let catalog = AgentCatalog::load(&config.working_dir, &config)?;
+        let profile = catalog
+            .profile("default")
+            .ok_or_else(|| AppError::AgentConfig("default agent profile is missing".to_owned()))?;
+        let registry = registry_from_names(&profile.enabled_tools)?;
+        let mut context = ToolContext::new(&config.working_dir, config.allow_write);
+        context.confirm_writes = config.confirm_writes;
+        context.command_allowlist = profile.command_allowlist.clone();
+        context.interactive = false;
+        context.graph_client_id = config.microsoft_graph_client_id.clone();
+        context.graph_tenant = config.microsoft_graph_tenant.clone();
+        context.graph_scope = config.microsoft_graph_scope.clone();
+        context.gmail_client_id = config.google_gmail_client_id.clone();
+        context.gmail_client_secret = config.google_gmail_client_secret.clone();
+        context.google_calendar_client_id = config.google_calendar_client_id.clone();
+        context.google_calendar_client_secret = config.google_calendar_client_secret.clone();
+        context.web_search_provider = config.web_search_provider.clone();
+        context.web_search_endpoint = config.web_search_endpoint.clone();
+        context.web_search_api_key = config.web_search_api_key.clone();
+        let provider = desktop_provider(&config, &profile.provider)?;
+        let agent = crate::agent::Agent::new(provider, registry, context, profile.max_tool_rounds)
+            .with_system_prompt(catalog.system_prompt(profile)?)
+            .with_loop_limits(
+                Some(std::time::Duration::from_secs(config.max_loop_seconds)),
+                config.max_diff_bytes,
+            )
+            .with_reasoning_effort(config.reasoning_effort.clone());
+        let mut runtime_session = Session::new(&config.working_dir, &session.model)?;
+        runtime_session.set_model(&session.model)?;
+        self.agents.insert(
+            session.id,
+            DesktopAgent {
+                agent,
+                session: runtime_session,
+            },
+        );
+        Ok(())
+    }
+
+    /// Runs the existing non-streaming Agent loop for a desktop prompt.
+    pub async fn send_message(
+        &mut self,
+        request_id: Uuid,
+        session_id: Uuid,
+        prompt: &str,
+    ) -> Result<ApplicationEnvelope<ApplicationEvent>, AppError> {
+        let session_dto = self
+            .sessions
+            .get(&session_id)
+            .cloned()
+            .ok_or_else(|| AppError::InvalidConfig("session not found".to_owned()))?;
+        if prompt.trim().is_empty() {
+            return Err(AppError::EmptyMessage);
+        }
+        if !self.agents.contains_key(&session_id) {
+            self.initialize_agent(&session_dto)?;
+        }
+        let runtime = self
+            .agents
+            .get_mut(&session_id)
+            .ok_or_else(|| AppError::InvalidConfig("agent runtime not found".to_owned()))?;
+        let response = runtime.agent.complete(&mut runtime.session, prompt).await?;
+        let message_count = runtime.session.messages().len();
+        if let Some(dto) = self.sessions.get_mut(&session_id) {
+            dto.message_count = message_count;
+        }
+        Ok(ApplicationEnvelope {
+            api_version: APPLICATION_API_VERSION,
+            request_id,
+            sequence: self.next_sequence(),
+            payload: ApplicationEvent::AssistantMessage {
+                session_id,
+                content: response.content,
+                tool_rounds: response.tool_rounds,
+            },
+        })
+    }
+
     /// Lists only sessions belonging to the requested project.
     pub fn list_sessions(&self, project_id: &str) -> Vec<SessionDto> {
         self.sessions
@@ -407,6 +559,11 @@ impl ApplicationService {
             ApplicationCommand::RefreshModels { .. } => {
                 return Err(AppError::InvalidConfig(
                     "refresh_models must use the asynchronous service method".to_owned(),
+                ));
+            }
+            ApplicationCommand::SendMessage { .. } => {
+                return Err(AppError::InvalidConfig(
+                    "send_message must use the asynchronous service method".to_owned(),
                 ));
             }
         };

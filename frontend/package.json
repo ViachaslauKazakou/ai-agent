@@ -4,9 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "check": "node --check app.js"
+    "check": "node --check app.js",
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1 --port 1420"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.8.0"
+    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0"
+  },
+  "devDependencies": {
+    "vite": "^6.1.0"
   }
 }

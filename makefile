@@ -51,6 +51,10 @@ uninstall:
 run:
 	$(CARGO) run --manifest-path $(MANIFEST) -- $(ARGS)
 
+desktop:
+	@test -d $(PROJECT_DIR)/frontend/node_modules/@tauri-apps/plugin-dialog || (echo "frontend dependencies are missing or outdated; running npm install" && cd $(PROJECT_DIR)/frontend && npm install)
+	cd $(PROJECT_DIR)/src-tauri && RUST_BACKTRACE=1 $(CARGO) tauri dev
+
 run-release: release
 	target/release/$(BINARY) $(ARGS)
 

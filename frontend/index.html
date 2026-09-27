@@ -24,7 +24,10 @@
             <button id="refresh" class="icon-button" type="button" title="Refresh capabilities">↻</button>
           </div>
           <label class="field-label" for="project-path">Project path</label>
-          <input id="project-path" type="text" value="." autocomplete="off" />
+          <div class="path-picker">
+            <input id="project-path" type="text" value="." autocomplete="off" />
+            <button id="choose-project" class="secondary-button path-button" type="button">Choose…</button>
+          </div>
           <button id="open-project" class="primary-button" type="button">Open project</button>
           <label class="field-label session-label" for="model">Model</label>
           <input id="model" type="text" value="demo-model" autocomplete="off" />
@@ -54,13 +57,31 @@
               <p>Open a local project to verify the desktop application service.</p>
             </article>
           </div>
+          <details class="trace-panel" open>
+            <summary>Execution log</summary>
+            <pre id="trace" class="trace" aria-live="polite"></pre>
+          </details>
           <form id="composer" class="composer">
-            <input id="prompt" type="text" placeholder="Desktop API stage is metadata-only" disabled />
-            <button type="submit" disabled>Send</button>
+            <input id="prompt" type="text" placeholder="Ask the agent about this project…" disabled />
+            <button id="send" type="submit" disabled>Send</button>
           </form>
         </section>
       </section>
     </main>
-    <script type="module" src="./app.js"></script>
+    <script>
+      // Keep startup failures visible in the window. A module import can fail
+      // before app.js runs, which otherwise leaves the initial status frozen.
+      window.reportFrontendError = (error) => {
+        const status = document.querySelector("#status");
+        if (status) status.textContent = `Frontend error: ${String(error)}`;
+      };
+      window.addEventListener("error", (event) => {
+        window.reportFrontendError(event.error?.message || event.message);
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        window.reportFrontendError(event.reason);
+      });
+    </script>
+    <script type="module" src="./app.js" onerror="window.reportFrontendError('failed to load app.js')"></script>
   </body>
 </html>

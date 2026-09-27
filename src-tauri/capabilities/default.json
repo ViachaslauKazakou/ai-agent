@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Minimal permissions for the AI Agent desktop shell",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

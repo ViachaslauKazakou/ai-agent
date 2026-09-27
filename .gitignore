@@ -8,4 +8,5 @@ src-tauri/target/
 src-tauri/gen/
 frontend/node_modules/
 frontend/package-lock.json
+frontend/dist/
 client_secret_*.apps.googleusercontent.com.json

@@ -21,7 +21,10 @@ h1 { margin: 5px 0 0; font-size: clamp(2.2rem, 6vw, 4.6rem); font-weight: 400; l
 input { width: 100%; border: 1px solid #4b6870; border-radius: 3px; padding: 11px; color: #e9f0f2; background: #142326; outline: none; }
 input:focus { border-color: #8eb9a7; }
 .primary-button { width: 100%; margin-top: 12px; border: 0; border-radius: 3px; padding: 12px; color: #102022; background: #8eb9a7; cursor: pointer; font-weight: 700; }
+.path-picker { display: grid; grid-template-columns: minmax(0, 1fr) 92px; align-items: stretch; gap: 8px; width: 100%; }
+.path-picker input { min-width: 0; width: 100%; }
 .secondary-button { width: 100%; margin-top: 8px; border: 1px solid #8eb9a7; border-radius: 3px; padding: 10px; color: #b9d2c8; background: transparent; cursor: pointer; }
+.path-picker .path-button { width: 92px !important; min-width: 92px; margin-top: 0; padding-inline: 8px; white-space: nowrap; }
 .secondary-button:disabled { cursor: not-allowed; opacity: .45; }
 .session-label { margin-top: 22px; }
 .meta-card { margin-top: 34px; padding-top: 15px; border-top: 1px solid #38535a; }
@@ -33,5 +36,11 @@ input:focus { border-color: #8eb9a7; }
 .message p { margin: 9px 0 0; color: #c9d7d7; line-height: 1.55; }
 .message.error { border-color: #e18172; }
 .composer { display: flex; gap: 10px; padding: 20px; border-top: 1px solid #38535a; }
+.composer input { flex: 1; }
+.composer button { min-width: 82px; cursor: pointer; }
+.composer button:disabled { cursor: not-allowed; opacity: .45; }
+.trace-panel { border-top: 1px solid #38535a; padding: 14px 20px 0; color: #9daeb1; font: 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.trace-panel summary { cursor: pointer; color: #8eb9a7; }
+.trace { max-height: 130px; margin: 10px 0 16px; overflow: auto; white-space: pre-wrap; color: #aebfc0; }
 .composer button { border: 0; border-radius: 3px; padding: 0 20px; color: #102022; background: #8eb9a7; }
 @media (max-width: 720px) { .shell { padding: 20px; } .workspace { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid #38535a; } .topbar { align-items: start; flex-direction: column; } }
