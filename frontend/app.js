@@ -35,6 +35,13 @@ async function execute(command) {
   });
 }
 
+async function refreshModels(projectId) {
+  return invoke("refresh_models", {
+    requestId: requestId(),
+    projectId,
+  });
+}
+
 async function loadCapabilities() {
   try {
     const envelope = await execute({ type: "get_capabilities" });
@@ -49,7 +56,9 @@ async function loadCapabilities() {
     const modelEnvelope = await execute({ type: "list_models" });
     const providerList = modelEnvelope.payload.providers;
     models.textContent = providerList.length
-      ? providerList.flatMap((provider) => provider.models).join(" · ") || "registry providers"
+      ? providerList
+          .map((provider) => `${provider.name}: ${provider.models.join(", ") || "no models"}${provider.reachable ? "" : " (offline/registry)"}`)
+          .join(" · ")
       : "not configured";
   } catch (error) {
     showError(error);
@@ -65,7 +74,7 @@ document.querySelector("#open-project").addEventListener("click", async () => {
     const project = envelope.payload;
     activeProject = project;
     createSessionButton.disabled = false;
-    const modelEnvelope = await execute({ type: "list_models" });
+    const modelEnvelope = await refreshModels(activeProject.id);
     const providerList = modelEnvelope.payload.providers;
     models.textContent = providerList.length
       ? providerList.flatMap((provider) => provider.models).join(" · ") || "registry providers"

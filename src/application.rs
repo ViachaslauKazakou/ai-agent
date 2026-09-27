@@ -18,7 +18,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AppError, Config, ProviderRegistry, cli::Cli};
+use crate::{AppError, Config, LiteLlmProvider, OllamaProvider, ProviderRegistry, cli::Cli};
 
 /// Version of the command/event contract exchanged with external clients.
 ///
@@ -84,6 +84,8 @@ pub enum ApplicationCommand {
     CancelRequest { request_id: Uuid },
     /// Return configured provider names and their public model metadata.
     ListModels,
+    /// Query configured provider endpoints for their current model list.
+    RefreshModels { project_id: String },
 }
 
 /// Events emitted by the application service.
@@ -124,6 +126,8 @@ pub struct ProviderDto {
     pub kind: String,
     /// Models declared in the project registry.
     pub models: Vec<String>,
+    /// Whether the last live model request reached this provider successfully.
+    pub reachable: bool,
 }
 
 /// Envelope used to correlate a client command with emitted events.
@@ -221,6 +225,49 @@ impl ApplicationService {
         self.providers = public_providers(&config.providers);
         self.configs.insert(project.id.clone(), config);
         Ok(())
+    }
+
+    /// Queries each configured provider's `/models` endpoint.
+    ///
+    /// The registry remains the source of provider credentials and endpoints.
+    /// Only returned model identifiers are copied into the public DTO state.
+    pub async fn refresh_models(&mut self, project_id: &str) -> Result<Vec<ProviderDto>, AppError> {
+        let config = self
+            .configs
+            .get(project_id)
+            .ok_or_else(|| AppError::InvalidConfig(format!("project not found: {project_id}")))?
+            .clone();
+        let mut refreshed = Vec::new();
+
+        for (name, provider_config) in &config.providers.providers {
+            let mut provider_configured = config.clone();
+            provider_configured.provider = name.clone();
+            provider_configured.api_base_url = provider_config.base_url.clone();
+            provider_configured.api_key = provider_config.api_key.clone();
+            let declared_models = provider_config.models.clone();
+            let live_models = match provider_config.kind.as_str() {
+                "ollama" => match OllamaProvider::new(&provider_configured) {
+                    Ok(provider) => provider.list_models().await,
+                    Err(error) => Err(error),
+                },
+                _ => match LiteLlmProvider::new(&provider_configured) {
+                    Ok(provider) => provider.list_models().await,
+                    Err(error) => Err(error),
+                },
+            };
+            let (models, reachable) = match live_models {
+                Ok(models) => (models.into_iter().map(|model| model.id).collect(), true),
+                Err(_) => (declared_models, false),
+            };
+            refreshed.push(ProviderDto {
+                name: name.clone(),
+                kind: provider_config.kind.clone(),
+                models,
+                reachable,
+            });
+        }
+        self.providers = refreshed.clone();
+        Ok(refreshed)
     }
 
     /// Opens a project path and returns a process-local identifier.
@@ -357,6 +404,11 @@ impl ApplicationService {
             ApplicationCommand::ListModels => ApplicationEvent::ModelsListed {
                 providers: self.providers.clone(),
             },
+            ApplicationCommand::RefreshModels { .. } => {
+                return Err(AppError::InvalidConfig(
+                    "refresh_models must use the asynchronous service method".to_owned(),
+                ));
+            }
         };
 
         Ok(ApplicationEnvelope {
@@ -378,6 +430,7 @@ fn public_providers(registry: &ProviderRegistry) -> Vec<ProviderDto> {
             name: name.clone(),
             kind: provider.kind.clone(),
             models: provider.models.clone(),
+            reachable: false,
         })
         .collect()
 }

@@ -4,12 +4,11 @@
 //! only translates IPC requests into `ai_agent::application` commands and
 //! serializes the resulting safe DTO envelope for the frontend.
 
-use std::sync::Mutex;
-
 use ai_agent::application::{
     ApplicationCommand, ApplicationEnvelope, ApplicationEvent, ApplicationService,
 };
 use tauri::State;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// Shared service state owned by one desktop process.
@@ -20,27 +19,49 @@ struct DesktopState(Mutex<ApplicationService>);
 /// Tauri exposes only this narrow boundary.  The frontend cannot access the
 /// filesystem, credentials, tools, or the internal session maps directly.
 #[tauri::command]
-fn execute_command(
+async fn execute_command(
     state: State<'_, DesktopState>,
     request_id: String,
     command: ApplicationCommand,
 ) -> Result<ApplicationEnvelope<ApplicationEvent>, String> {
     let request_id =
         Uuid::parse_str(&request_id).map_err(|error| format!("invalid request id: {error}"))?;
-    let mut service = state
-        .0
-        .lock()
-        .map_err(|_| "desktop service lock is poisoned".to_owned())?;
+    let mut service = state.0.lock().await;
     service
         .execute(request_id, command)
         .map_err(|error| error.to_string())
+}
+
+/// Refreshes model identifiers from the configured provider APIs.
+///
+/// Network access is kept in the Rust service; the frontend receives only the
+/// bounded public provider DTOs returned by the application layer.
+#[tauri::command]
+async fn refresh_models(
+    state: State<'_, DesktopState>,
+    request_id: String,
+    project_id: String,
+) -> Result<ApplicationEnvelope<ApplicationEvent>, String> {
+    let request_id = Uuid::parse_str(&request_id)
+        .map_err(|error| format!("invalid request id: {error}"))?;
+    let mut service = state.0.lock().await;
+    let providers = service
+        .refresh_models(&project_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(ApplicationEnvelope {
+        api_version: ai_agent::application::APPLICATION_API_VERSION,
+        request_id,
+        sequence: service.next_sequence(),
+        payload: ApplicationEvent::ModelsListed { providers },
+    })
 }
 
 /// Returns the Tauri application and registers the stateful command adapter.
 fn main() {
     tauri::Builder::default()
         .manage(DesktopState(Mutex::new(ApplicationService::new())))
-        .invoke_handler(tauri::generate_handler![execute_command])
+        .invoke_handler(tauri::generate_handler![execute_command, refresh_models])
         .run(tauri::generate_context!())
         .expect("error while running ai-agent desktop application");
 }

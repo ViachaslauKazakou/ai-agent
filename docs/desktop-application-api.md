@@ -33,6 +33,7 @@ Tauri IPC or a loopback browser transport.
 - `list_sessions`
 - `cancel_request`
 - `list_models`
+- `refresh_models`
 
 The `ApplicationService::execute` dispatcher validates each command, assigns a
 monotonic sequence number, and returns one `ApplicationEnvelope` containing the
@@ -50,6 +51,12 @@ configuration code, loads `providers.json`, and keeps the resulting `Config`
 private in the service. The frontend receives only `ProviderDto` metadata. This
 avoids a second desktop-specific configuration parser and keeps CLI and desktop
 configuration behavior aligned.
+
+`refresh_models` must be used after opening a project to query the configured
+provider endpoints. `list_models` returns only the registry allowlist; it does
+not make network requests. Refreshing therefore requires a reachable endpoint
+and a valid provider API key where applicable. Ollama must be running locally,
+and an OpenAI-compatible provider must expose `GET /models`.
 
 Workers use `RequestCancellation` as a cooperative flag.  A transport can
 register a request, pass the non-serializable handle to the async provider
