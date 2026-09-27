@@ -52,6 +52,22 @@
 
 ## Установка и инициализация проекта
 
+Подробная инструкция по настройке и запуску консольного и desktop-клиента
+находится в [RUNNING.md](RUNNING.md).
+
+Кратко:
+
+```bash
+# консольная разработка
+cargo run -- --working-dir /path/to/project
+
+# desktop-разработка
+make desktop
+
+# release-сборка консоли и desktop
+make release-all
+```
+
 ## Desktop-клиент (Tauri 2)
 
 В репозитории есть cross-platform desktop-клиент в `src-tauri/` с frontend в
