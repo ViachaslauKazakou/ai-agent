@@ -397,10 +397,9 @@ impl ApplicationService {
             })?
             .clone();
         let catalog = AgentCatalog::load(&config.working_dir, &config)?;
-        let mut profile = catalog
+        let profile = catalog
             .profile("default")
             .ok_or_else(|| AppError::AgentConfig("default agent profile is missing".to_owned()))?;
-        profile.model = session.model.clone();
         let registry = registry_from_names(&profile.enabled_tools)?;
         let mut context = ToolContext::new(&config.working_dir, config.allow_write);
         context.confirm_writes = config.confirm_writes;
@@ -430,6 +429,9 @@ impl ApplicationService {
                 config.max_diff_bytes,
             )
             .with_reasoning_effort(config.reasoning_effort.clone());
+        // Session model is selected by the desktop model list. The existing
+        // Agent API derives the request model from Session, so no provider
+        // credential or model selection is duplicated in the UI adapter.
         let mut runtime_session = Session::new(&config.working_dir, &session.model)?;
         runtime_session.set_model(&session.model)?;
         self.agents.insert(
