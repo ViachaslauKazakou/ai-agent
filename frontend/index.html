@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>AI Agent</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">LOCAL WORKSPACE / DESKTOP</p>
+          <h1>AI Agent</h1>
+        </div>
+        <div class="status-wrap">
+          <span id="thinking" class="thinking-indicator" hidden><i></i> Thinking</span>
+          <span id="status" class="status">Starting service…</span>
+          <button id="settings" class="toolbar-button settings-button" type="button" title="Configuration" aria-label="Open configuration">⚙</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <aside class="sidebar">
+          <div class="panel-heading">
+            <span>Project</span>
+            <button id="refresh" class="icon-button" type="button" title="Refresh capabilities">↻</button>
+          </div>
+          <label class="field-label" for="project-path">Project path</label>
+          <div class="path-picker">
+            <input id="project-path" type="text" value="." autocomplete="off" />
+            <button id="choose-project" class="secondary-button path-button" type="button">Choose…</button>
+          </div>
+          <button id="open-project" class="primary-button" type="button">Open project</button>
+          <label class="field-label session-label" for="provider">Provider</label>
+          <select id="provider" class="select-input" disabled>
+            <option value="">Open a project first</option>
+          </select>
+          <label class="field-label model-label" for="model">Model</label>
+          <input id="model" type="text" value="demo-model" autocomplete="off" disabled />
+          <button id="create-session" class="secondary-button" type="button" disabled>Create session</button>
+          <div class="meta-grid">
+            <div class="meta-card"><span class="meta-label">API</span><strong id="api-version">—</strong></div>
+            <div class="meta-card"><span class="meta-label">Capabilities</span><strong id="capabilities">—</strong></div>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Models</span>
+            <div id="models" class="model-list" aria-label="Available models">
+              <span class="empty-state">Open a project to load models</span>
+            </div>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Session</span>
+            <strong id="session">Not created</strong>
+          </div>
+        </aside>
+
+        <section class="chat-panel">
+          <div id="messages" class="messages" aria-live="polite">
+            <article class="message assistant">
+              <span class="message-label">SYSTEM</span>
+              <p>Open a local project to verify the desktop application service.</p>
+            </article>
+          </div>
+          <form id="composer" class="composer">
+            <div id="attachments" class="attachments" hidden></div>
+            <textarea id="prompt" rows="1" placeholder="Ask the agent about this project…" disabled></textarea>
+            <div class="composer-toolbar">
+              <div class="toolbar-actions">
+                <button id="quote" class="toolbar-button" type="button" title="Quote selected text">❝ <span>Quote</span></button>
+                <button id="attach" class="toolbar-button" type="button" title="Attach a file">＋ <span>Attach file</span></button>
+                <span id="used-tools" class="used-tools" hidden></span>
+              </div>
+              <button id="send" class="send-button" type="submit" disabled>Send <span>↗</span></button>
+            </div>
+          </form>
+        </section>
+      </section>
+      <footer class="bottom-dock">
+        <details class="trace-panel">
+          <summary>Execution log</summary>
+          <pre id="trace" class="trace" aria-live="polite"></pre>
+        </details>
+        <section class="tool-timeline" aria-live="polite">
+          <span class="message-label">LIVE TOOL TIMELINE</span>
+          <div id="tool-events" class="tool-events"><span class="empty-state">Idle</span></div>
+        </section>
+      </footer>
+    </main>
+    <dialog id="settings-dialog" class="settings-dialog">
+      <form method="dialog" class="settings-card" id="settings-form">
+        <div class="settings-header">
+          <div>
+            <span class="eyebrow">PROJECT SETTINGS</span>
+            <h2>Configuration</h2>
+          </div>
+          <button class="icon-button" value="cancel" type="submit" title="Close">×</button>
+        </div>
+        <p class="settings-help">Edit the project configuration and provider registry. Changes are validated and saved atomically.</p>
+        <label class="field-label" for="config-json">.aiagent/config.json</label>
+        <textarea id="config-json" class="config-editor" spellcheck="false"></textarea>
+        <label class="field-label" for="providers-json">.aiagent/providers.json</label>
+        <textarea id="providers-json" class="config-editor" spellcheck="false"></textarea>
+        <div class="settings-actions">
+          <button id="reload-settings" class="toolbar-button" type="button">Reload</button>
+          <span id="settings-status" class="settings-status"></span>
+          <button id="save-settings" class="primary-button" type="button">Save configuration</button>
+        </div>
+      </form>
+    </dialog>
+    <script>
+      // Keep startup failures visible in the window. A module import can fail
+      // before app.js runs, which otherwise leaves the initial status frozen.
+      window.reportFrontendError = (error) => {
+        const status = document.querySelector("#status");
+        if (status) status.textContent = `Frontend error: ${String(error)}`;
+      };
+      window.addEventListener("error", (event) => {
+        window.reportFrontendError(event.error?.message || event.message);
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        window.reportFrontendError(event.reason);
+      });
+    </script>
+    <script type="module" src="./app.js" onerror="window.reportFrontendError('failed to load app.js')"></script>
+  </body>
+</html>

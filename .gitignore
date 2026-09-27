@@ -4,4 +4,9 @@ config.json
 .agent-session.json
 .DS_Store
 target/
+src-tauri/target/
+src-tauri/gen/
+frontend/node_modules/
+frontend/package-lock.json
+frontend/dist/
 client_secret_*.apps.googleusercontent.com.json

@@ -172,6 +172,13 @@ pub struct CompletionRequest {
 }
 
 impl CompletionRequest {
+    /// LiteLLM/Bedrock reasoning deployments reject output limits below 16, but
+    /// a tool-enabled turn also needs enough room for a complete function call
+    /// and its JSON arguments. A 256-token floor prevents the model from
+    /// returning an empty assistant message after spending the whole budget on
+    /// tool-call reasoning.
+    pub const MIN_PROVIDER_MAX_TOKENS: u32 = 256;
+
     /// Создаёт запрос из доменной истории сообщений.
     pub fn from_messages(model: impl Into<String>, messages: &[Message]) -> Self {
         Self {
@@ -179,7 +186,7 @@ impl CompletionRequest {
             messages: messages.iter().map(LlmMessage::from_message).collect(),
             tools: None,
             temperature: None,
-            max_tokens: None,
+            max_tokens: Some(Self::MIN_PROVIDER_MAX_TOKENS),
             reasoning_effort: None,
         }
     }
@@ -195,8 +202,8 @@ impl CompletionRequest {
             messages,
             tools: (!tools.is_empty()).then_some(tools),
             temperature: None,
-            max_tokens: None,
-            // The provider adapter downgrades this when its endpoint does not
+            max_tokens: Some(Self::MIN_PROVIDER_MAX_TOKENS),
+            // Provider adapters remove this field when the endpoint does not
             // support reasoning together with function tools.
             reasoning_effort: Some(reasoning_effort.into()),
         }
@@ -461,6 +468,15 @@ mod tests {
         assert_eq!(
             serde_json::to_value(request).unwrap()["messages"][0]["role"],
             "user"
+        );
+    }
+
+    #[test]
+    fn requests_use_provider_safe_minimum_output_tokens() {
+        let request = CompletionRequest::from_messages("model", &[]);
+        assert_eq!(
+            request.max_tokens,
+            Some(CompletionRequest::MIN_PROVIDER_MAX_TOKENS)
         );
     }
 

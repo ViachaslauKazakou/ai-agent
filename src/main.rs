@@ -53,9 +53,11 @@ async fn main() {
         return;
     }
     if cli.gmail_login {
-        match ai_agent::connectors::gmail_auth::GmailAuth::from_env(Duration::from_secs(
-            config.request_timeout_secs,
-        )) {
+        match ai_agent::connectors::gmail_auth::GmailAuth::from_project_config(
+            Duration::from_secs(config.request_timeout_secs),
+            config.google_gmail_client_id.clone(),
+            config.google_gmail_client_secret.clone(),
+        ) {
             Ok(auth) => match auth.login().await {
                 Ok(()) => println!("Gmail авторизация завершена."),
                 Err(error) => eprintln!("Ошибка Gmail login: {error}"),
@@ -65,8 +67,16 @@ async fn main() {
         return;
     }
     if cli.google_calendar_login {
-        match ai_agent::connectors::gmail_auth::GmailAuth::from_env_with_scope(
+        match ai_agent::connectors::gmail_auth::GmailAuth::from_project_config_with_scope(
             Duration::from_secs(config.request_timeout_secs),
+            config
+                .google_calendar_client_id
+                .clone()
+                .or(config.google_gmail_client_id.clone()),
+            config
+                .google_calendar_client_secret
+                .clone()
+                .or(config.google_gmail_client_secret.clone()),
             "https://www.googleapis.com/auth/calendar.readonly",
         ) {
             Ok(auth) => match auth.login().await {
@@ -1398,10 +1408,12 @@ impl LlmProvider for ConfiguredProvider {
         let model_supports_tools =
             supports_tools || tools_models.iter().any(|model| model == &request.model);
         if !model_supports_effort {
-            // `none` is the portable value accepted by LiteLLM gateways.
-            request.reasoning_effort = Some("none".to_owned());
+            // Omit the field entirely. Some LiteLLM/Bedrock versions still
+            // inspect `reasoning_effort: none` and dereference a missing
+            // `thinking` object, returning an internal 400 error.
+            request.reasoning_effort = None;
         } else if request.tools.is_some() && !model_supports_tools {
-            request.reasoning_effort = Some("none".to_owned());
+            request.reasoning_effort = None;
         }
         match self {
             Self::LiteLlm { provider, .. } => provider.complete(request).await,

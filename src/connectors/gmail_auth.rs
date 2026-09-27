@@ -80,6 +80,34 @@ impl GmailAuth {
         })
     }
 
+    /// Creates OAuth configuration from the already loaded project config.
+    /// This is used by CLI login commands because Config::load reads
+    /// `.aiagent/config.json`, while `from_env` intentionally reads only the
+    /// process environment.
+    pub fn from_project_config(
+        timeout: Duration,
+        client_id: Option<String>,
+        client_secret: Option<String>,
+    ) -> Result<Self, AppError> {
+        let client_id = client_id
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| AppError::InvalidConfig("GOOGLE_GMAIL_CLIENT_ID не задан".into()))?;
+        Self::from_config(timeout, client_id, client_secret)
+    }
+
+    /// Project-config variant that preserves the requested OAuth scope.
+    pub fn from_project_config_with_scope(
+        timeout: Duration,
+        client_id: Option<String>,
+        client_secret: Option<String>,
+        scope: impl Into<String>,
+    ) -> Result<Self, AppError> {
+        let client_id = client_id
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| AppError::InvalidConfig("GOOGLE_GMAIL_CLIENT_ID не задан".into()))?;
+        Self::from_config_with_scope(timeout, client_id, client_secret, GMAIL_SERVICE, scope)
+    }
+
     pub fn from_config(
         timeout: Duration,
         client_id: String,

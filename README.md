@@ -52,6 +52,69 @@
 
 ## Установка и инициализация проекта
 
+Подробная инструкция по настройке и запуску консольного и desktop-клиента
+находится в [RUNNING.md](RUNNING.md).
+
+Кратко:
+
+```bash
+# консольная разработка
+cargo run -- --working-dir /path/to/project
+
+# desktop-разработка
+make desktop
+
+# release-сборка консоли и desktop
+make release-all
+```
+
+## Desktop-клиент (Tauri 2)
+
+В репозитории есть cross-platform desktop-клиент в `src-tauri/` с frontend в
+`frontend/`. Клиент открывает проект через native directory picker, загружает
+project-local configuration, показывает доступные модели, создаёт session и
+передаёт prompt существующему Rust Agent loop.
+
+Требуются Rust, Node.js и системные WebView-зависимости Tauri для вашей ОС.
+Запуск из корня репозитория:
+
+```bash
+cd frontend
+npm install
+npm run check
+cd ../src-tauri
+cargo tauri dev
+```
+
+Если команды `cargo tauri` нет, установите CLI версии 2:
+
+```bash
+cargo install tauri-cli --version '^2'
+```
+
+Для production package после настройки platform signing используйте
+`cargo tauri build --manifest-path src-tauri/Cargo.toml`. API keys и OAuth
+tokens не находятся во frontend или Tauri config; их обработка остаётся в
+Rust backend и OS credential storage.
+
+Для release-сборки всего проекта:
+
+```bash
+make release-all
+```
+
+Команда собирает консольный бинарник `target/release/ai-agent` и desktop
+приложение `via-agent` в `src-tauri/target/release/bundle/`. Для установки
+команды desktop в `~/.cargo/bin`:
+
+```bash
+make desktop-install
+via-agent --working-dir /path/to/project
+```
+
+Консольный агент по-прежнему запускается командой `ai-agent`. Удалить desktop
+launcher можно через `make desktop-uninstall`.
+
 После установки бинарника командой `cargo install` его можно запускать из любой
 папки проекта:
 
