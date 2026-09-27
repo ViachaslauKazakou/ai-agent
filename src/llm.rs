@@ -382,32 +382,90 @@ impl LiteLlmProvider {
 #[async_trait]
 impl LlmProvider for LiteLlmProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AppError> {
-        let mut builder = self.client.post(&self.endpoint).json(&request);
+        let response = self.send_completion(&request).await?;
+        if (200..300).contains(&response.status) {
+            let api_response: ApiResponse = serde_json::from_str(&response.body)
+                .map_err(|error| AppError::LlmJson(error.to_string()))?;
+            return api_response.try_into();
+        }
+
+        // OpenAI-compatible gateways are split between legacy models, which
+        // accept `max_tokens`, and newer reasoning models, which require
+        // `max_completion_tokens`. Detect the provider's explicit capability
+        // error and retry once with the alternate spelling. This keeps the
+        // public request type and all providers model-agnostic.
+        if supports_completion_token_alias(&response.body) && request.max_tokens.is_some() {
+            let retry_payload = completion_payload_with_alias(&request)?;
+            let response = self.send_completion_payload(retry_payload).await?;
+            if (200..300).contains(&response.status) {
+                let api_response: ApiResponse = serde_json::from_str(&response.body)
+                    .map_err(|error| AppError::LlmJson(error.to_string()))?;
+                return api_response.try_into();
+            }
+            return Err(AppError::LlmHttp {
+                status: response.status,
+                message: truncate_for_error(&response.body),
+            });
+        }
+
+        Err(AppError::LlmHttp {
+            status: response.status,
+            message: truncate_for_error(&response.body),
+        })
+    }
+}
+
+struct CompletionHttpResponse {
+    status: u16,
+    body: String,
+}
+
+impl LiteLlmProvider {
+    async fn send_completion(
+        &self,
+        request: &CompletionRequest,
+    ) -> Result<CompletionHttpResponse, AppError> {
+        let payload =
+            serde_json::to_value(request).map_err(|error| AppError::LlmJson(error.to_string()))?;
+        self.send_completion_payload(payload).await
+    }
+
+    async fn send_completion_payload(
+        &self,
+        payload: Value,
+    ) -> Result<CompletionHttpResponse, AppError> {
+        let mut builder = self.client.post(&self.endpoint).json(&payload);
         if let Some(api_key) = &self.api_key {
             builder = builder.header(header::AUTHORIZATION, format!("Bearer {api_key}"));
         }
-
         let response = builder
             .send()
             .await
             .map_err(|error| AppError::LlmNetwork(error.to_string()))?;
-        let status = response.status();
+        let status = response.status().as_u16();
         let body = response
             .text()
             .await
             .map_err(|error| AppError::LlmNetwork(error.to_string()))?;
-
-        if !status.is_success() {
-            return Err(AppError::LlmHttp {
-                status: status.as_u16(),
-                message: truncate_for_error(&body),
-            });
-        }
-
-        let api_response: ApiResponse =
-            serde_json::from_str(&body).map_err(|error| AppError::LlmJson(error.to_string()))?;
-        api_response.try_into()
+        Ok(CompletionHttpResponse { status, body })
     }
+}
+
+fn supports_completion_token_alias(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("max_tokens") && lower.contains("max_completion_tokens")
+}
+
+fn completion_payload_with_alias(request: &CompletionRequest) -> Result<Value, AppError> {
+    let mut payload =
+        serde_json::to_value(request).map_err(|error| AppError::LlmJson(error.to_string()))?;
+    let max_tokens = payload
+        .as_object_mut()
+        .and_then(|object| object.remove("max_tokens"));
+    if let Some(max_tokens) = max_tokens {
+        payload["max_completion_tokens"] = max_tokens;
+    }
+    Ok(payload)
 }
 
 /// Клиент локального Ollama через его OpenAI-compatible API.
@@ -478,6 +536,25 @@ mod tests {
             request.max_tokens,
             Some(CompletionRequest::MIN_PROVIDER_MAX_TOKENS)
         );
+    }
+
+    #[test]
+    fn retries_payload_with_completion_token_name() {
+        let request = CompletionRequest::from_messages("model", &[]);
+        let payload = super::completion_payload_with_alias(&request).unwrap();
+
+        assert_eq!(payload["max_completion_tokens"], 256);
+        assert!(payload.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn detects_explicit_provider_token_parameter_error() {
+        assert!(super::supports_completion_token_alias(
+            "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens' instead"
+        ));
+        assert!(!super::supports_completion_token_alias(
+            "Unsupported parameter: 'temperature'"
+        ));
     }
 
     #[test]
