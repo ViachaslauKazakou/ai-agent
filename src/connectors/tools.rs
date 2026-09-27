@@ -151,7 +151,12 @@ fn calendar_range(args: &Value) -> (String, String, usize) {
         .get("to")
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .unwrap_or_else(|| (now + Duration::hours(24)).to_rfc3339());
+        // Natural-language requests such as "calendar for next week" are not
+        // always converted into explicit tool arguments by the model. A
+        // one-day fallback silently misses valid events, so the safe default
+        // covers the upcoming seven days while explicit RFC3339 ranges still
+        // take precedence.
+        .unwrap_or_else(|| (now + Duration::days(7)).to_rfc3339());
     let limit = args
         .get("limit")
         .and_then(Value::as_u64)
@@ -197,7 +202,7 @@ impl Tool for ListCalendarEvents {
         "List read-only events from Google Calendar or the macOS Calendar for a time range."
     }
     fn parameters_schema(&self) -> Value {
-        json!({"type":"object","properties":{"from":{"type":"string","description":"RFC3339 start; defaults to now"},"to":{"type":"string","description":"RFC3339 end; defaults to 24 hours from now"},"limit":{"type":"integer","minimum":1,"maximum":250}},"additionalProperties":false})
+        json!({"type":"object","properties":{"from":{"type":"string","description":"RFC3339 start; defaults to now"},"to":{"type":"string","description":"RFC3339 end; defaults to seven days from now"},"limit":{"type":"integer","minimum":1,"maximum":250}},"additionalProperties":false})
     }
     async fn execute(&self, args: Value, context: &ToolContext) -> Result<ToolResult, AppError> {
         let events = calendar_events(&args, context).await?;
