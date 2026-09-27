@@ -104,10 +104,12 @@ function renderModels(providerList) {
     button.type = "button";
     button.className = "model-item";
     button.dataset.model = entry.model;
+    button.dataset.provider = entry.provider;
     button.title = `${entry.provider} / ${entry.model}`;
     button.innerHTML = `<span>${entry.model}</span><small>${entry.provider}</small>`;
     button.addEventListener("click", () => {
       modelInput.value = entry.model;
+      modelInput.dataset.provider = entry.provider;
       for (const item of models.querySelectorAll(".model-item")) item.classList.remove("selected");
       button.classList.add("selected");
       status.textContent = `Model selected: ${entry.model}`;
@@ -291,6 +293,8 @@ document.querySelector("#open-project").addEventListener("click", async () => {
     const modelEnvelope = await refreshModels(activeProject.id);
     const providerList = providersFrom(modelEnvelope);
     renderModels(providerList);
+    const selectedProvider = providerList.find((provider) => provider.models.includes(modelInput.value));
+    if (selectedProvider) modelInput.dataset.provider = selectedProvider.name;
     status.textContent = `Open: ${project.id}`;
     const item = document.createElement("article");
     item.className = "message assistant";
@@ -323,7 +327,7 @@ createSessionButton.addEventListener("click", async () => {
   try {
     const envelope = await execute({
       type: "create_session",
-      payload: { project_id: activeProject.id, model: modelInput.value },
+      payload: { project_id: activeProject.id, provider: modelInput.dataset.provider || "litellm", model: modelInput.value },
     });
     const created = eventPayload(envelope, "session_created");
     activeSession = created;

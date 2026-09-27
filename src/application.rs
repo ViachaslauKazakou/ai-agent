@@ -48,6 +48,9 @@ pub struct SessionDto {
     pub id: Uuid,
     /// Project to which the session belongs.
     pub project_id: String,
+    /// Provider paired with the selected model. Keeping this pair prevents a
+    /// LiteLLM model from being sent to Ollama (or the reverse).
+    pub provider: String,
     /// Model name; credentials and provider configuration are intentionally absent.
     pub model: String,
     /// Number of messages currently retained by the session.
@@ -82,7 +85,11 @@ pub enum ApplicationCommand {
     /// Return projects already registered in this service instance.
     ListProjects,
     /// Create a new empty session for an opened project.
-    CreateSession { project_id: String, model: String },
+    CreateSession {
+        project_id: String,
+        provider: String,
+        model: String,
+    },
     /// Return sessions currently known to the service.
     ListSessions { project_id: String },
     /// Request cancellation of an in-flight operation.
@@ -363,6 +370,7 @@ impl ApplicationService {
     pub fn create_session(
         &mut self,
         project_id: &str,
+        provider: String,
         model: String,
     ) -> Result<SessionDto, String> {
         if !self.projects.contains_key(project_id) {
@@ -375,6 +383,7 @@ impl ApplicationService {
         let session = SessionDto {
             id: Uuid::new_v4(),
             project_id: project_id.to_owned(),
+            provider,
             model,
             message_count: 0,
         };
@@ -416,12 +425,7 @@ impl ApplicationService {
         context.web_search_endpoint = config.web_search_endpoint.clone();
         context.web_search_api_key = config.web_search_api_key.clone();
         context.status = activity;
-        let provider_name = if config.providers.provider(&profile.provider).is_some() {
-            profile.provider.clone()
-        } else {
-            config.provider.clone()
-        };
-        let provider = desktop_provider(&config, &provider_name)?;
+        let provider = desktop_provider(&config, &session.provider)?;
         let agent = crate::agent::Agent::new(provider, registry, context, profile.max_tool_rounds)
             .with_system_prompt(catalog.system_prompt(profile)?)
             .with_loop_limits(
@@ -593,9 +597,13 @@ impl ApplicationService {
             ApplicationCommand::ListProjects => ApplicationEvent::ProjectsListed {
                 projects: self.projects.values().cloned().collect(),
             },
-            ApplicationCommand::CreateSession { project_id, model } => {
+            ApplicationCommand::CreateSession {
+                project_id,
+                provider,
+                model,
+            } => {
                 let session = self
-                    .create_session(&project_id, model)
+                    .create_session(&project_id, provider, model)
                     .map_err(AppError::InvalidConfig)?;
                 ApplicationEvent::SessionCreated(session)
             }
@@ -683,10 +691,10 @@ mod tests {
         let first = service.open_project(PathBuf::from("/tmp/first"));
         let second = service.open_project(PathBuf::from("/tmp/second"));
         service
-            .create_session(&first.id, "model-a".to_owned())
+            .create_session(&first.id, "litellm".to_owned(), "model-a".to_owned())
             .unwrap();
         service
-            .create_session(&second.id, "model-b".to_owned())
+            .create_session(&second.id, "ollama".to_owned(), "model-b".to_owned())
             .unwrap();
 
         let sessions = service.list_sessions(&first.id);
