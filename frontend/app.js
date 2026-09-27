@@ -68,6 +68,39 @@ function providersFrom(envelope) {
   return providers;
 }
 
+// Renders a bounded, keyboard-accessible model list. Selecting a model only
+// changes the pending session value; the backend receives it when the user
+// explicitly creates the session.
+function renderModels(providerList) {
+  models.replaceChildren();
+  const entries = providerList.flatMap((provider) =>
+    provider.models.map((model) => ({ provider: provider.name, model })),
+  );
+  if (!entries.length) {
+    const empty = document.createElement("span");
+    empty.className = "empty-state";
+    empty.textContent = "No models available";
+    models.append(empty);
+    return;
+  }
+  for (const entry of entries) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "model-item";
+    button.dataset.model = entry.model;
+    button.title = `${entry.provider} / ${entry.model}`;
+    button.innerHTML = `<span>${entry.model}</span><small>${entry.provider}</small>`;
+    button.addEventListener("click", () => {
+      modelInput.value = entry.model;
+      for (const item of models.querySelectorAll(".model-item")) item.classList.remove("selected");
+      button.classList.add("selected");
+      status.textContent = `Model selected: ${entry.model}`;
+      logStep("model selected", `${entry.provider} / ${entry.model}`);
+    });
+    models.append(button);
+  }
+}
+
 function showError(error) {
   status.textContent = "Service error";
   logStep("ERROR", String(error));
@@ -119,11 +152,7 @@ async function loadCapabilities() {
     status.textContent = "Service ready";
     const modelEnvelope = await execute({ type: "list_models" });
     const providerList = providersFrom(modelEnvelope);
-    models.textContent = providerList.length
-      ? providerList
-          .map((provider) => `${provider.name}: ${provider.models.join(", ") || "no models"}${provider.reachable ? "" : " (offline/registry)"}`)
-          .join(" · ")
-      : "not configured";
+    renderModels(providerList);
     logStep("startup complete", `${providerList.length} provider(s) in registry`);
   } catch (error) {
     showError(error);
@@ -145,9 +174,7 @@ document.querySelector("#open-project").addEventListener("click", async () => {
     status.textContent = "Project opened; refreshing models…";
     const modelEnvelope = await refreshModels(activeProject.id);
     const providerList = providersFrom(modelEnvelope);
-    models.textContent = providerList.length
-      ? providerList.flatMap((provider) => provider.models).join(" · ") || "registry providers"
-      : "not configured";
+    renderModels(providerList);
     status.textContent = `Open: ${project.id}`;
     const item = document.createElement("article");
     item.className = "message assistant";
