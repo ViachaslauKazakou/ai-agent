@@ -81,6 +81,24 @@ cargo install tauri-cli --version '^2'
 tokens не находятся во frontend или Tauri config; их обработка остаётся в
 Rust backend и OS credential storage.
 
+Для release-сборки всего проекта:
+
+```bash
+make release-all
+```
+
+Команда собирает консольный бинарник `target/release/ai-agent` и desktop
+приложение `via-agent` в `src-tauri/target/release/bundle/`. Для установки
+команды desktop в `~/.cargo/bin`:
+
+```bash
+make desktop-install
+via-agent --working-dir /path/to/project
+```
+
+Консольный агент по-прежнему запускается командой `ai-agent`. Удалить desktop
+launcher можно через `make desktop-uninstall`.
+
 После установки бинарника командой `cargo install` его можно запускать из любой
 папки проекта:
 
