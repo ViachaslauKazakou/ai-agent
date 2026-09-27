@@ -33,8 +33,12 @@
             <button id="choose-project" class="secondary-button path-button" type="button">Choose…</button>
           </div>
           <button id="open-project" class="primary-button" type="button">Open project</button>
-          <label class="field-label session-label" for="model">Model</label>
-          <input id="model" type="text" value="demo-model" autocomplete="off" />
+          <label class="field-label session-label" for="provider">Provider</label>
+          <select id="provider" class="select-input" disabled>
+            <option value="">Open a project first</option>
+          </select>
+          <label class="field-label model-label" for="model">Model</label>
+          <input id="model" type="text" value="demo-model" autocomplete="off" disabled />
           <button id="create-session" class="secondary-button" type="button" disabled>Create session</button>
           <div class="meta-grid">
             <div class="meta-card"><span class="meta-label">API</span><strong id="api-version">—</strong></div>

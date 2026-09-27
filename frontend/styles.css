@@ -24,7 +24,9 @@ h1 { margin: 3px 0 0; font-size: clamp(1.5rem, 2.5vw, 2.2rem); font-weight: 400;
 .field-label { display: block; margin-bottom: 8px; color: #9daeb1; font: 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace; }
 input { width: 100%; border: 1px solid #4b6870; border-radius: 3px; padding: 11px; color: #e9f0f2; background: #142326; outline: none; }
 textarea { width: 100%; border: 1px solid #4b6870; border-radius: 3px; padding: 11px; color: #e9f0f2; background: #142326; outline: none; }
-input:focus, textarea:focus { border-color: #8eb9a7; }
+select { width: 100%; border: 1px solid #4b6870; border-radius: 3px; padding: 11px; color: #e9f0f2; background: #142326; outline: none; }
+input:focus, textarea:focus, select:focus { border-color: #8eb9a7; }
+.select-input:disabled, input:disabled { cursor: not-allowed; opacity: .55; }
 .primary-button { width: 100%; margin-top: 12px; border: 0; border-radius: 3px; padding: 12px; color: #102022; background: #8eb9a7; cursor: pointer; font-weight: 700; }
 .path-picker { display: grid; grid-template-columns: minmax(0, 1fr) 92px; align-items: stretch; gap: 8px; width: 100%; }
 .path-picker input { min-width: 0; width: 100%; }
@@ -32,6 +34,7 @@ input:focus, textarea:focus { border-color: #8eb9a7; }
 .path-picker .path-button { width: 92px !important; min-width: 92px; margin-top: 0; padding-inline: 8px; white-space: nowrap; }
 .secondary-button:disabled { cursor: not-allowed; opacity: .45; }
 .session-label { margin-top: 22px; }
+.model-label { margin-top: 12px; }
 .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .meta-card { margin-top: 22px; padding-top: 10px; border-top: 1px solid #38535a; }
 .meta-grid .meta-card { margin-top: 22px; }

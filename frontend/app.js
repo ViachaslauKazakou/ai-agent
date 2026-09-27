@@ -17,6 +17,7 @@ const pathInput = document.querySelector("#project-path");
 const apiVersion = document.querySelector("#api-version");
 const capabilities = document.querySelector("#capabilities");
 const models = document.querySelector("#models");
+const providerInput = document.querySelector("#provider");
 const modelInput = document.querySelector("#model");
 const createSessionButton = document.querySelector("#create-session");
 const session = document.querySelector("#session");
@@ -43,6 +44,7 @@ let activeSession;
 let attachedFiles = [];
 let usedToolNames = new Set();
 let activityTimer;
+let availableProviders = [];
 
 function logStep(message, details = "") {
   const line = `[${new Date().toLocaleTimeString()}] ${message}${details ? `: ${details}` : ""}`;
@@ -88,8 +90,24 @@ function providersFrom(envelope) {
 // changes the pending session value; the backend receives it when the user
 // explicitly creates the session.
 function renderModels(providerList) {
+  availableProviders = providerList;
+  const selectedProvider = providerInput.value;
+  providerInput.replaceChildren();
+  for (const provider of providerList) {
+    const option = document.createElement("option");
+    option.value = provider.name;
+    option.textContent = `${provider.name} (${provider.kind})`;
+    providerInput.append(option);
+  }
+  providerInput.disabled = providerList.length === 0;
+  if (providerList.length) {
+    providerInput.value = providerList.some((provider) => provider.name === selectedProvider)
+      ? selectedProvider
+      : providerList[0].name;
+  }
   models.replaceChildren();
-  const entries = providerList.flatMap((provider) =>
+  const activeProvider = providerList.find((provider) => provider.name === providerInput.value);
+  const entries = (activeProvider ? [activeProvider] : providerList).flatMap((provider) =>
     provider.models.map((model) => ({ provider: provider.name, model })),
   );
   if (!entries.length) {
@@ -109,6 +127,7 @@ function renderModels(providerList) {
     button.innerHTML = `<span>${entry.model}</span><small>${entry.provider}</small>`;
     button.addEventListener("click", () => {
       modelInput.value = entry.model;
+      providerInput.value = entry.provider;
       modelInput.dataset.provider = entry.provider;
       for (const item of models.querySelectorAll(".model-item")) item.classList.remove("selected");
       button.classList.add("selected");
@@ -117,6 +136,17 @@ function renderModels(providerList) {
     });
     models.append(button);
   }
+}
+
+function selectProvider(providerName) {
+  providerInput.value = providerName;
+  modelInput.dataset.provider = providerName;
+  const provider = availableProviders.find((item) => item.name === providerName);
+  const firstModel = provider?.models?.[0];
+  modelInput.value = firstModel || "";
+  renderModels(availableProviders);
+  status.textContent = `Provider selected: ${providerName}`;
+  logStep("provider selected", providerName);
 }
 
 function showError(error) {
@@ -294,7 +324,7 @@ document.querySelector("#open-project").addEventListener("click", async () => {
     const providerList = providersFrom(modelEnvelope);
     renderModels(providerList);
     const selectedProvider = providerList.find((provider) => provider.models.includes(modelInput.value));
-    if (selectedProvider) modelInput.dataset.provider = selectedProvider.name;
+    if (selectedProvider) selectProvider(selectedProvider.name);
     status.textContent = `Open: ${project.id}`;
     const item = document.createElement("article");
     item.className = "message assistant";
@@ -339,6 +369,8 @@ createSessionButton.addEventListener("click", async () => {
     showError(error);
   }
 });
+
+providerInput.addEventListener("change", () => selectProvider(providerInput.value));
 
 composer.addEventListener("submit", async (event) => {
   event.preventDefault();
