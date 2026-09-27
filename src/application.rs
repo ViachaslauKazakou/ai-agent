@@ -211,7 +211,9 @@ fn desktop_provider(config: &Config, name: &str) -> Result<DesktopProvider, AppE
         _ => Ok(DesktopProvider::LiteLlm {
             provider: LiteLlmProvider::new(&selected)?,
             supports_reasoning_effort: provider.supports_reasoning_effort,
+            supports_reasoning_with_tools: provider.supports_reasoning_with_tools,
             reasoning_effort_models: provider.reasoning_effort_models.clone(),
+            reasoning_with_tools_models: provider.reasoning_with_tools_models.clone(),
         }),
     }
 }
@@ -230,7 +232,9 @@ enum DesktopProvider {
     LiteLlm {
         provider: crate::LiteLlmProvider,
         supports_reasoning_effort: bool,
+        supports_reasoning_with_tools: bool,
         reasoning_effort_models: Vec<String>,
+        reasoning_with_tools_models: Vec<String>,
     },
     Ollama(crate::OllamaProvider),
 }
@@ -244,7 +248,9 @@ impl crate::LlmProvider for DesktopProvider {
         let mut request = request;
         if let Self::LiteLlm {
             supports_reasoning_effort,
+            supports_reasoning_with_tools,
             reasoning_effort_models,
+            reasoning_with_tools_models,
             ..
         } = self
         {
@@ -257,9 +263,14 @@ impl crate::LlmProvider for DesktopProvider {
                 // adapters dereference a missing `thinking` object for it.
                 request.reasoning_effort = None;
             }
-            // `reasoning_effort` is an OpenAI-compatible request parameter.
-            // Keep it on tool turns as well; if a specific proxy/model route
-            // rejects the combination, LiteLlmProvider retries without it.
+            if request.tools.is_some()
+                && !(*supports_reasoning_with_tools
+                    || reasoning_with_tools_models
+                        .iter()
+                        .any(|model| model == &request.model))
+            {
+                request.reasoning_effort = None;
+            }
         }
         match self {
             Self::LiteLlm { provider, .. } => provider.complete(request).await,
