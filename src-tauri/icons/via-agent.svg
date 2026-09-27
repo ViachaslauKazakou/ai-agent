@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#243d49"/>
+      <stop offset="0.52" stop-color="#13242f"/>
+      <stop offset="1" stop-color="#071219"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#dce9e5"/>
+      <stop offset="0.48" stop-color="#9cb8b5"/>
+      <stop offset="1" stop-color="#587478"/>
+    </linearGradient>
+    <linearGradient id="faceEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f8fffa"/>
+      <stop offset="1" stop-color="#6d8c90"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#122b37"/>
+      <stop offset="1" stop-color="#07151c"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <filter id="textShadow" x="-20%" y="-30%" width="140%" height="170%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="blur"/>
+      <feOffset dy="8" result="offset"/>
+      <feFlood flood-color="#02090d" flood-opacity="0.8"/>
+      <feComposite in2="offset" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Mac-style rounded app tile with a deep, metallic atmosphere. -->
+  <rect x="44" y="44" width="936" height="936" rx="214" fill="#02090d" opacity="0.62" filter="url(#shadow)"/>
+  <rect x="40" y="32" width="944" height="944" rx="216" fill="url(#shell)"/>
+  <path d="M256 54h512c120 0 202 82 202 202v70C797 211 657 143 490 143 321 143 183 207 54 330v-74C54 135 136 54 256 54Z" fill="#ffffff" opacity="0.08"/>
+  <path d="M118 776c169 99 365 119 562 55 101-33 184-87 256-161v105c0 120-82 202-202 202H256c-84 0-151-38-190-103Z" fill="#000" opacity="0.24"/>
+
+  <!-- Antenna and status light. -->
+  <path d="M512 175v-68" stroke="#9cb8b5" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="512" cy="84" r="28" fill="#f1c978" stroke="#f8e1a0" stroke-width="8"/>
+  <circle cx="502" cy="75" r="8" fill="#fff" opacity="0.8"/>
+
+  <!-- Robot extrusion and metallic face. -->
+  <rect x="226" y="251" width="572" height="414" rx="126" fill="#02090d" opacity="0.75" filter="url(#softShadow)" transform="translate(0 25)"/>
+  <rect x="226" y="238" width="572" height="414" rx="126" fill="url(#faceEdge)"/>
+  <rect x="244" y="256" width="536" height="378" rx="108" fill="url(#face)"/>
+  <rect x="301" y="335" width="422" height="224" rx="74" fill="url(#screen)" stroke="#e4f2ec" stroke-opacity="0.5" stroke-width="10"/>
+  <path d="M337 365h300c43 0 76 26 76 61H312c0-35 33-61 76-61Z" fill="#fff" opacity="0.07"/>
+
+  <!-- Friendly bootstrap-like robot eyes and smile. -->
+  <circle cx="425" cy="434" r="38" fill="#f1c978"/>
+  <circle cx="599" cy="434" r="38" fill="#f1c978"/>
+  <circle cx="414" cy="422" r="11" fill="#fff" opacity="0.85"/>
+  <circle cx="588" cy="422" r="11" fill="#fff" opacity="0.85"/>
+  <path d="M440 500c39 34 105 34 144 0" fill="none" stroke="#8eb9a7" stroke-width="18" stroke-linecap="round"/>
+
+  <!-- Side bolts and compact arms suggest a desktop assistant rather than a mascot. -->
+  <circle cx="255" cy="449" r="20" fill="#f1c978" stroke="#29434d" stroke-width="10"/>
+  <circle cx="769" cy="449" r="20" fill="#f1c978" stroke="#29434d" stroke-width="10"/>
+  <path d="M185 449h-42M839 449h42" stroke="#8eb9a7" stroke-width="18" stroke-linecap="round"/>
+
+  <!-- Embossed product name. -->
+  <text x="512" y="806" text-anchor="middle" fill="#02090d" opacity="0.8" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="68" font-weight="800" letter-spacing="13" transform="translate(0 12)" filter="url(#softShadow)">VIA-AGENT</text>
+  <text x="512" y="806" text-anchor="middle" fill="#b9cfca" stroke="#f4fffa" stroke-opacity="0.22" stroke-width="2" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="68" font-weight="800" letter-spacing="13">VIA-AGENT</text>
+  <path d="M292 845h440" stroke="#8eb9a7" stroke-width="5" stroke-linecap="round" opacity="0.5"/>
+</svg>
