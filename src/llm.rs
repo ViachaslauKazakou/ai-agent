@@ -384,6 +384,18 @@ impl LlmProvider for LiteLlmProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AppError> {
         let mut payload =
             serde_json::to_value(&request).map_err(|error| AppError::LlmJson(error.to_string()))?;
+        // Chat Completions providers commonly support reasoning_effort for a
+        // plain response but reject the same parameter when function tools
+        // are present. Tool execution is a separate request mode: keep
+        // reasoning_effort for normal turns and remove it before the first
+        // tool-enabled HTTP request instead of making an avoidable 400 round
+        // trip.
+        if request.tools.is_some() {
+            payload
+                .as_object_mut()
+                .expect("CompletionRequest serializes to an object")
+                .remove("reasoning_effort");
+        }
         let mut last_response = None;
 
         // OpenAI-compatible gateways differ in both token-limit spelling and
@@ -552,6 +564,27 @@ mod tests {
         assert!(!super::supports_reasoning_tool_alias(
             "Unsupported parameter: 'reasoning_effort'"
         ));
+    }
+
+    #[test]
+    fn tool_payload_omits_effort_before_http_request() {
+        let request = CompletionRequest::from_llm_messages(
+            "gpt-6-luna",
+            Vec::new(),
+            vec![super::ToolDefinition::function(
+                "test_tool",
+                "test",
+                json!({"type": "object"}),
+            )],
+            "high",
+        );
+        let mut payload = serde_json::to_value(&request).unwrap();
+        if request.tools.is_some() {
+            payload.as_object_mut().unwrap().remove("reasoning_effort");
+        }
+
+        assert!(payload.get("reasoning_effort").is_none());
+        assert!(payload.get("tools").is_some());
     }
 
     #[test]
