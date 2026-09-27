@@ -9,7 +9,7 @@ use std::{
     collections::BTreeMap,
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -145,6 +145,15 @@ pub struct ProviderDto {
     pub models: Vec<String>,
     /// Whether the last live model request reached this provider successfully.
     pub reachable: bool,
+}
+
+/// Configuration documents exposed to the desktop settings editor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsDocuments {
+    /// Project behavior, access, and connector settings.
+    pub config_json: String,
+    /// Provider endpoints, model allowlists, and provider credentials.
+    pub providers_json: String,
 }
 
 /// Envelope used to correlate a client command with emitted events.
@@ -362,6 +371,7 @@ impl ApplicationService {
         if model.trim().is_empty() {
             return Err("model must not be empty".to_owned());
         }
+        let model = model.trim().to_owned();
         let session = SessionDto {
             id: Uuid::new_v4(),
             project_id: project_id.to_owned(),
@@ -374,7 +384,11 @@ impl ApplicationService {
 
     /// Creates the runtime agent for a session using the same project-local
     /// profile, tools, provider, and safety settings as the CLI.
-    fn initialize_agent(&mut self, session: &SessionDto) -> Result<(), AppError> {
+    fn initialize_agent(
+        &mut self,
+        session: &SessionDto,
+        activity: Arc<Mutex<Option<String>>>,
+    ) -> Result<(), AppError> {
         let config = self
             .configs
             .get(&session.project_id)
@@ -383,9 +397,10 @@ impl ApplicationService {
             })?
             .clone();
         let catalog = AgentCatalog::load(&config.working_dir, &config)?;
-        let profile = catalog
+        let mut profile = catalog
             .profile("default")
             .ok_or_else(|| AppError::AgentConfig("default agent profile is missing".to_owned()))?;
+        profile.model = session.model.clone();
         let registry = registry_from_names(&profile.enabled_tools)?;
         let mut context = ToolContext::new(&config.working_dir, config.allow_write);
         context.confirm_writes = config.confirm_writes;
@@ -401,7 +416,13 @@ impl ApplicationService {
         context.web_search_provider = config.web_search_provider.clone();
         context.web_search_endpoint = config.web_search_endpoint.clone();
         context.web_search_api_key = config.web_search_api_key.clone();
-        let provider = desktop_provider(&config, &profile.provider)?;
+        context.status = activity;
+        let provider_name = if config.providers.provider(&profile.provider).is_some() {
+            profile.provider.clone()
+        } else {
+            config.provider.clone()
+        };
+        let provider = desktop_provider(&config, &provider_name)?;
         let agent = crate::agent::Agent::new(provider, registry, context, profile.max_tool_rounds)
             .with_system_prompt(catalog.system_prompt(profile)?)
             .with_loop_limits(
@@ -428,6 +449,20 @@ impl ApplicationService {
         session_id: Uuid,
         prompt: &str,
     ) -> Result<ApplicationEnvelope<ApplicationEvent>, AppError> {
+        self.send_message_with_activity(request_id, session_id, prompt, Arc::new(Mutex::new(None)))
+            .await
+    }
+
+    /// Runs a prompt while sharing the tool activity slot with a transport.
+    /// The Tauri adapter polls this slot and emits timeline events without
+    /// holding the service lock, so the UI remains responsive during tools.
+    pub async fn send_message_with_activity(
+        &mut self,
+        request_id: Uuid,
+        session_id: Uuid,
+        prompt: &str,
+        activity: Arc<Mutex<Option<String>>>,
+    ) -> Result<ApplicationEnvelope<ApplicationEvent>, AppError> {
         let session_dto = self
             .sessions
             .get(&session_id)
@@ -437,7 +472,7 @@ impl ApplicationService {
             return Err(AppError::EmptyMessage);
         }
         if !self.agents.contains_key(&session_id) {
-            self.initialize_agent(&session_dto)?;
+            self.initialize_agent(&session_dto, activity)?;
         }
         let runtime = self
             .agents
@@ -458,6 +493,34 @@ impl ApplicationService {
                 tool_rounds: response.tool_rounds,
             },
         })
+    }
+
+    /// Reads both project-local settings documents for the settings dialog.
+    pub fn read_settings(&self, project_id: &str) -> Result<SettingsDocuments, AppError> {
+        let project = self
+            .projects
+            .get(project_id)
+            .ok_or_else(|| AppError::InvalidConfig(format!("project not found: {project_id}")))?;
+        Ok(SettingsDocuments {
+            config_json: Config::read_project_config_json(&project.path)?,
+            providers_json: Config::read_provider_config_json(&project.path)?,
+        })
+    }
+
+    /// Validates and persists settings, then reloads the service configuration.
+    pub fn write_settings(
+        &mut self,
+        project_id: &str,
+        config_json: &str,
+        providers_json: &str,
+    ) -> Result<(), AppError> {
+        let project =
+            self.projects.get(project_id).cloned().ok_or_else(|| {
+                AppError::InvalidConfig(format!("project not found: {project_id}"))
+            })?;
+        Config::write_project_config_json(&project.path, config_json)?;
+        Config::write_provider_config_json(&project.path, providers_json)?;
+        self.load_project_config(&project)
     }
 
     /// Lists only sessions belonging to the requested project.

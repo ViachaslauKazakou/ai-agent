@@ -191,6 +191,40 @@ impl fmt::Debug for Config {
 }
 
 impl Config {
+    /// Reads the project JSON document for the desktop settings editor.
+    ///
+    /// The editor receives the project file itself because mail and search
+    /// access fields live there. Provider credentials are kept in the separate
+    /// `providers.json` document and are handled by the companion methods below.
+    pub fn read_project_config_json(project_dir: &Path) -> Result<String, AppError> {
+        fs::read_to_string(project_dir.join(PROJECT_CONFIG_PATH))
+            .map_err(|error| AppError::AgentConfig(error.to_string()))
+    }
+
+    /// Validates and atomically writes a project JSON document.
+    pub fn write_project_config_json(project_dir: &Path, content: &str) -> Result<(), AppError> {
+        let config: JsonConfig = serde_json::from_str(content)
+            .map_err(|error| AppError::AgentConfig(format!("config.json: {error}")))?;
+        let data = serde_json::to_vec_pretty(&config)
+            .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+        atomic_write(&project_dir.join(PROJECT_CONFIG_PATH), &data)
+    }
+
+    /// Reads the provider registry used by the desktop settings editor.
+    pub fn read_provider_config_json(project_dir: &Path) -> Result<String, AppError> {
+        fs::read_to_string(project_dir.join(PROVIDERS_CONFIG_PATH))
+            .map_err(|error| AppError::AgentConfig(error.to_string()))
+    }
+
+    /// Validates and atomically writes the provider registry document.
+    pub fn write_provider_config_json(project_dir: &Path, content: &str) -> Result<(), AppError> {
+        let providers: ProviderRegistry = serde_json::from_str(content)
+            .map_err(|error| AppError::AgentConfig(format!("providers.json: {error}")))?;
+        let data = serde_json::to_vec_pretty(&providers)
+            .map_err(|error| AppError::AgentConfig(error.to_string()))?;
+        atomic_write(&project_dir.join(PROVIDERS_CONFIG_PATH), &data)
+    }
+
     /// Возвращает безопасное читаемое JSON-представление конфигурации.
     /// Секрет API намеренно заменяется на `<redacted>`.
     pub fn to_pretty_json(&self) -> String {
@@ -796,6 +830,14 @@ pub fn persist_selection(project_dir: &Path, provider: &str, model: &str) -> Res
     let data = serde_json::to_vec_pretty(&config)
         .map_err(|error| AppError::AgentConfig(error.to_string()))?;
     fs::write(path, data).map_err(|error| AppError::AgentConfig(error.to_string()))
+}
+
+/// Writes a configuration file through a temporary sibling before replacing
+/// the original, so a process interruption cannot leave invalid JSON behind.
+fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, data).map_err(|error| AppError::AgentConfig(error.to_string()))?;
+    fs::rename(&temporary, path).map_err(|error| AppError::AgentConfig(error.to_string()))
 }
 
 pub fn persist_reasoning_effort(project_dir: &Path, effort: &str) -> Result<(), AppError> {

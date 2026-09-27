@@ -6,13 +6,18 @@
 
 use ai_agent::application::{
     ApplicationCommand, ApplicationEnvelope, ApplicationEvent, ApplicationService,
+    SettingsDocuments,
 };
 use tauri::State;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use std::sync::Arc;
 
 /// Shared service state owned by one desktop process.
 struct DesktopState(Mutex<ApplicationService>);
+
+/// Redacted current tool name shared with the desktop timeline.
+struct DesktopActivity(Arc<std::sync::Mutex<Option<String>>>);
 
 /// Executes one versioned application command through the shared service.
 ///
@@ -71,6 +76,7 @@ async fn refresh_models(
 #[tauri::command]
 async fn send_message(
     state: State<'_, DesktopState>,
+    activity: State<'_, DesktopActivity>,
     request_id: String,
     session_id: String,
     prompt: String,
@@ -82,19 +88,60 @@ async fn send_message(
     eprintln!("[desktop] send_message session_id={session_id} request_id={request_id}");
     let mut service = state.0.lock().await;
     let result = service
-        .send_message(request_id, session_id, &prompt)
+        .send_message_with_activity(request_id, session_id, &prompt, activity.0.clone())
         .await
         .map_err(|error| error.to_string());
     eprintln!("[desktop] send_message completed success={}", result.is_ok());
     result
 }
 
+/// Loads the two project-local JSON documents for the settings dialog.
+#[tauri::command]
+async fn read_settings(
+    state: State<'_, DesktopState>,
+    project_id: String,
+) -> Result<SettingsDocuments, String> {
+    let service = state.0.lock().await;
+    service.read_settings(&project_id).map_err(|error| error.to_string())
+}
+
+/// Validates and atomically saves edited project settings.
+///
+/// Validation happens in the shared configuration module before any runtime
+/// state is reloaded, so malformed JSON cannot replace the active files.
+#[tauri::command]
+async fn write_settings(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    config_json: String,
+    providers_json: String,
+) -> Result<(), String> {
+    let mut service = state.0.lock().await;
+    service
+        .write_settings(&project_id, &config_json, &providers_json)
+        .map_err(|error| error.to_string())
+}
+
+/// Returns only the current tool name; arguments and results stay private.
+#[tauri::command]
+fn tool_activity(activity: State<'_, DesktopActivity>) -> Option<String> {
+    activity.0.lock().ok().and_then(|value| value.clone())
+}
+
 /// Returns the Tauri application and registers the stateful command adapter.
 fn main() {
     tauri::Builder::default()
         .manage(DesktopState(Mutex::new(ApplicationService::new())))
+        .manage(DesktopActivity(Arc::new(std::sync::Mutex::new(None))))
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![execute_command, refresh_models, send_message])
+        .invoke_handler(tauri::generate_handler![
+            execute_command,
+            refresh_models,
+            send_message,
+            tool_activity,
+            read_settings,
+            write_settings
+        ])
         .run(tauri::generate_context!())
         .expect("error while running ai-agent desktop application");
 }

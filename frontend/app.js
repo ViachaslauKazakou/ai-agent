@@ -25,8 +25,24 @@ const trace = document.querySelector("#trace");
 const promptInput = document.querySelector("#prompt");
 const composer = document.querySelector("#composer");
 const sendButton = document.querySelector("#send");
+const thinking = document.querySelector("#thinking");
+const attachments = document.querySelector("#attachments");
+const usedTools = document.querySelector("#used-tools");
+const quoteButton = document.querySelector("#quote");
+const attachButton = document.querySelector("#attach");
+const toolEvents = document.querySelector("#tool-events");
+const settingsButton = document.querySelector("#settings");
+const settingsDialog = document.querySelector("#settings-dialog");
+const configEditor = document.querySelector("#config-json");
+const providersEditor = document.querySelector("#providers-json");
+const settingsStatus = document.querySelector("#settings-status");
+const reloadSettingsButton = document.querySelector("#reload-settings");
+const saveSettingsButton = document.querySelector("#save-settings");
 let activeProject;
 let activeSession;
+let attachedFiles = [];
+let usedToolNames = new Set();
+let activityTimer;
 
 function logStep(message, details = "") {
   const line = `[${new Date().toLocaleTimeString()}] ${message}${details ? `: ${details}` : ""}`;
@@ -110,6 +126,106 @@ function showError(error) {
   item.querySelector("p").textContent = String(error);
   messages.append(item);
 }
+
+function setThinking(value) {
+  thinking.hidden = !value;
+  if (value) status.textContent = "Agent is thinking…";
+}
+
+function renderComposerAttachments() {
+  attachments.replaceChildren();
+  attachments.hidden = attachedFiles.length === 0;
+  for (const file of attachedFiles) {
+    const chip = document.createElement("span");
+    chip.className = "attachment-chip";
+    chip.textContent = file.name;
+    attachments.append(chip);
+  }
+}
+
+function renderUsedTools() {
+  usedTools.hidden = usedToolNames.size === 0;
+  usedTools.textContent = usedToolNames.size ? `Tools: ${[...usedToolNames].join(", ")}` : "";
+}
+
+// Polls only the redacted current tool name while the request is running.
+// Tool arguments and results never cross this UI boundary.
+function showToolActivity(tool) {
+  if (!tool) return;
+  usedToolNames.add(tool);
+  renderUsedTools();
+  const item = document.createElement("div");
+  item.className = "tool-event";
+  item.textContent = `${new Date().toLocaleTimeString()}  ${tool}`;
+  if (toolEvents.querySelector(".empty-state")) toolEvents.replaceChildren();
+  toolEvents.append(item);
+  while (toolEvents.children.length > 12) toolEvents.firstElementChild.remove();
+  toolEvents.scrollTop = toolEvents.scrollHeight;
+}
+
+function startActivityPolling() {
+  activityTimer = window.setInterval(async () => {
+    try {
+      showToolActivity(await invoke("tool_activity"));
+    } catch (error) {
+      logStep("activity polling failed", String(error));
+    }
+  }, 250);
+}
+
+function stopActivityPolling() {
+  if (activityTimer) window.clearInterval(activityTimer);
+  activityTimer = undefined;
+}
+
+async function loadSettings() {
+  if (!activeProject) {
+    settingsStatus.textContent = "Open a project first";
+    return;
+  }
+  settingsStatus.textContent = "Loading…";
+  try {
+    const documents = await invoke("read_settings", { projectId: activeProject.id });
+    configEditor.value = documents.config_json;
+    providersEditor.value = documents.providers_json;
+    settingsStatus.textContent = "Loaded";
+  } catch (error) {
+    settingsStatus.textContent = "Load failed";
+    showError(error);
+  }
+}
+
+settingsButton.addEventListener("click", async () => {
+  if (!activeProject) {
+    status.textContent = "Open a project before editing settings";
+    return;
+  }
+  settingsDialog.showModal();
+  await loadSettings();
+});
+reloadSettingsButton.addEventListener("click", loadSettings);
+saveSettingsButton.addEventListener("click", async () => {
+  if (!activeProject) return;
+  settingsStatus.textContent = "Saving…";
+  saveSettingsButton.disabled = true;
+  try {
+    await invoke("write_settings", {
+      projectId: activeProject.id,
+      configJson: configEditor.value,
+      providersJson: providersEditor.value,
+    });
+    settingsStatus.textContent = "Saved";
+    status.textContent = "Configuration saved";
+    settingsDialog.close();
+    const modelEnvelope = await refreshModels(activeProject.id);
+    renderModels(providersFrom(modelEnvelope));
+  } catch (error) {
+    settingsStatus.textContent = "Save failed";
+    showError(error);
+  } finally {
+    saveSettingsButton.disabled = false;
+  }
+});
 
 async function execute(command) {
   const id = requestId();
@@ -226,7 +342,11 @@ composer.addEventListener("submit", async (event) => {
   if (!activeSession || !prompt) return;
   promptInput.disabled = true;
   sendButton.disabled = true;
-  status.textContent = "Agent is working…";
+  setThinking(true);
+  usedToolNames.clear();
+  renderUsedTools();
+  toolEvents.replaceChildren();
+  startActivityPolling();
   logStep("send message", `${activeSession.id}: ${prompt}`);
   try {
     const request = requestId();
@@ -249,9 +369,46 @@ composer.addEventListener("submit", async (event) => {
   } catch (error) {
     showError(error);
   } finally {
+    stopActivityPolling();
+    setThinking(false);
     promptInput.disabled = false;
     sendButton.disabled = false;
     promptInput.focus();
+  }
+});
+
+promptInput.addEventListener("input", () => {
+  promptInput.style.height = "auto";
+  promptInput.style.height = `${Math.min(promptInput.scrollHeight, 180)}px`;
+});
+
+promptInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    event.preventDefault();
+    composer.requestSubmit();
+  }
+});
+
+quoteButton.addEventListener("click", () => {
+  const selection = window.getSelection()?.toString().trim();
+  if (!selection) {
+    status.textContent = "Select text in the conversation first";
+    return;
+  }
+  promptInput.value += `${promptInput.value ? "\n\n" : ""}> ${selection.split("\n").join("\n> ")}\n`;
+  promptInput.dispatchEvent(new Event("input"));
+  promptInput.focus();
+});
+
+attachButton.addEventListener("click", async () => {
+  try {
+    const selected = await open({ multiple: true, directory: false, title: "Attach files" });
+    if (Array.isArray(selected)) attachedFiles = selected.map((path) => ({ name: path.split(/[\\/]/).pop(), path }));
+    else if (typeof selected === "string") attachedFiles = [{ name: selected.split(/[\\/]/).pop(), path: selected }];
+    renderComposerAttachments();
+    logStep("files attached", `${attachedFiles.length} file(s)`);
+  } catch (error) {
+    showError(error);
   }
 });
 

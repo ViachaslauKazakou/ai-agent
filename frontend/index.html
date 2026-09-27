@@ -11,10 +11,14 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">LOCAL WORKSPACE</p>
+          <p class="eyebrow">LOCAL WORKSPACE / DESKTOP</p>
           <h1>AI Agent</h1>
         </div>
-        <span id="status" class="status">Starting service…</span>
+        <div class="status-wrap">
+          <span id="thinking" class="thinking-indicator" hidden><i></i> Thinking</span>
+          <span id="status" class="status">Starting service…</span>
+          <button id="settings" class="toolbar-button settings-button" type="button" title="Configuration" aria-label="Open configuration">⚙</button>
+        </div>
       </header>
 
       <section class="workspace">
@@ -32,13 +36,9 @@
           <label class="field-label session-label" for="model">Model</label>
           <input id="model" type="text" value="demo-model" autocomplete="off" />
           <button id="create-session" class="secondary-button" type="button" disabled>Create session</button>
-          <div class="meta-card">
-            <span class="meta-label">API</span>
-            <strong id="api-version">—</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">Capabilities</span>
-            <strong id="capabilities">—</strong>
+          <div class="meta-grid">
+            <div class="meta-card"><span class="meta-label">API</span><strong id="api-version">—</strong></div>
+            <div class="meta-card"><span class="meta-label">Capabilities</span><strong id="capabilities">—</strong></div>
           </div>
           <div class="meta-card">
             <span class="meta-label">Models</span>
@@ -59,17 +59,52 @@
               <p>Open a local project to verify the desktop application service.</p>
             </article>
           </div>
-          <details class="trace-panel" open>
-            <summary>Execution log</summary>
-            <pre id="trace" class="trace" aria-live="polite"></pre>
-          </details>
           <form id="composer" class="composer">
-            <input id="prompt" type="text" placeholder="Ask the agent about this project…" disabled />
-            <button id="send" type="submit" disabled>Send</button>
+            <div id="attachments" class="attachments" hidden></div>
+            <textarea id="prompt" rows="1" placeholder="Ask the agent about this project…" disabled></textarea>
+            <div class="composer-toolbar">
+              <div class="toolbar-actions">
+                <button id="quote" class="toolbar-button" type="button" title="Quote selected text">❝ <span>Quote</span></button>
+                <button id="attach" class="toolbar-button" type="button" title="Attach a file">＋ <span>Attach file</span></button>
+                <span id="used-tools" class="used-tools" hidden></span>
+              </div>
+              <button id="send" class="send-button" type="submit" disabled>Send <span>↗</span></button>
+            </div>
           </form>
         </section>
       </section>
+      <footer class="bottom-dock">
+        <details class="trace-panel">
+          <summary>Execution log</summary>
+          <pre id="trace" class="trace" aria-live="polite"></pre>
+        </details>
+        <section class="tool-timeline" aria-live="polite">
+          <span class="message-label">LIVE TOOL TIMELINE</span>
+          <div id="tool-events" class="tool-events"><span class="empty-state">Idle</span></div>
+        </section>
+      </footer>
     </main>
+    <dialog id="settings-dialog" class="settings-dialog">
+      <form method="dialog" class="settings-card" id="settings-form">
+        <div class="settings-header">
+          <div>
+            <span class="eyebrow">PROJECT SETTINGS</span>
+            <h2>Configuration</h2>
+          </div>
+          <button class="icon-button" value="cancel" type="submit" title="Close">×</button>
+        </div>
+        <p class="settings-help">Edit the project configuration and provider registry. Changes are validated and saved atomically.</p>
+        <label class="field-label" for="config-json">.aiagent/config.json</label>
+        <textarea id="config-json" class="config-editor" spellcheck="false"></textarea>
+        <label class="field-label" for="providers-json">.aiagent/providers.json</label>
+        <textarea id="providers-json" class="config-editor" spellcheck="false"></textarea>
+        <div class="settings-actions">
+          <button id="reload-settings" class="toolbar-button" type="button">Reload</button>
+          <span id="settings-status" class="settings-status"></span>
+          <button id="save-settings" class="primary-button" type="button">Save configuration</button>
+        </div>
+      </form>
+    </dialog>
     <script>
       // Keep startup failures visible in the window. A module import can fail
       // before app.js runs, which otherwise leaves the initial status frozen.
