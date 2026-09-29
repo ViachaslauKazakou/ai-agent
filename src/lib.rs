@@ -27,7 +27,9 @@ pub mod word_processing;
 pub use config::{Config, ProviderConfig, ProviderRegistry};
 pub use domain::{Message, Role, Session, ToolCallMessage};
 pub use error::AppError;
-pub use launch_state::{LAUNCH_STATE_SCHEMA_VERSION, LaunchState, LaunchStateStore, RecentProject};
+pub use launch_state::{
+    LAUNCH_STATE_SCHEMA_VERSION, LaunchState, LaunchStateStore, RecentProject, RecentSession,
+};
 pub use llm::{
     CompletionRequest, CompletionResponse, FunctionCall, FunctionDefinition, LiteLlmProvider,
     LlmMessage, LlmProvider, ModelInfo, OllamaProvider, ToolCall, ToolDefinition, Usage,

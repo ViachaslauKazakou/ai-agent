@@ -121,21 +121,22 @@ Desktop должен запускаться со стартового экран
 
 ### Этап 2. Стартовый экран и оболочка режимов
 
-Статус: [ ] не начато.
+Статус: [x] завершено, ожидает пользовательской проверки и коммита.
 
 Задачи:
 
-- [ ] Разделить монолитный `frontend/app.js` на API, state/navigation и views.
-- [ ] Добавить тестируемую модель состояний boot/route/project/session.
-- [ ] Сделать launcher начальным экраном.
-- [ ] Добавить карточки Chat-bot, Assistant, AI Tutor и Coder.
-- [ ] Для Chat-bot добавить recent projects, выбор каталога и выбор модели.
-- [ ] Добавить действие возврата/смены проекта с явно описанной политикой сброса.
-- [ ] Добавить RAG как disabled-заглушку с честной подписью «в разработке».
-- [ ] Исправить layout до viewport height и независимый scroll sidebar/chat.
-- [ ] Обеспечить keyboard focus, labels, loading, empty и error states.
-- [ ] Добавить frontend unit tests и включить их в `npm run check`.
-- [ ] Обновить desktop-инструкции и приложить manual smoke checklist.
+- [x] Вынести тестируемую state/navigation модель из монолитного `frontend/app.js`.
+- [x] Добавить тестируемую модель состояний boot/route/project/session.
+- [x] Сделать launcher начальным экраном.
+- [x] Добавить карточки Chat-bot, Assistant, AI Tutor и Coder.
+- [x] Для Chat-bot добавить recent projects, выбор каталога и существующий выбор модели в workspace.
+- [x] При открытии недавнего проекта активировать последнюю Desktop-сессию, provider и model.
+- [x] Добавить действие возврата/смены проекта с явно описанной политикой сброса.
+- [x] Добавить RAG как disabled-заглушку с честной подписью «в разработке».
+- [x] Исправить layout до viewport height и независимый scroll sidebar/chat.
+- [x] Обеспечить keyboard focus, labels, loading, empty и error states.
+- [x] Добавить frontend unit tests и включить их в `npm run check`.
+- [x] Обновить desktop-инструкции и приложить manual smoke checklist.
 
 Критерии приемки:
 

@@ -153,13 +153,33 @@ Start the desktop client:
 make desktop
 ```
 
-The Tauri window opens the frontend through the local Vite server. In the UI:
+Development always uses `127.0.0.1:1420`, matching `tauri.conf.json`. Vite is
+configured with a strict port and will stop with an explicit error instead of
+silently moving to `1421`, which Tauri cannot load. If another previous dev
+process still owns the port, stop that process with `Ctrl+C` before retrying.
 
-1. Click `Choose…` and select a project directory.
-2. Click `Open project`.
-3. Select a provider and a model.
-4. Click `Create session`.
+Vite also loads its config natively. This prevents temporary bundled config
+files under `frontend/node_modules/.vite-temp` from triggering Tauri's Rust
+watcher during the initial binary link.
+
+The Tauri window opens the launcher through the local Vite server. In the UI:
+
+1. Select `Chat-bot` on the mode screen. `Assistant`, `AI Tutor`, and `Coder`
+   currently show an explicit planned-feature notice.
+2. Choose an available recent project, or click `Choose…` and select a project
+   directory.
+3. Click `Open project`. The chat workspace appears only after Rust validates
+   the path and loads its configuration.
+4. If a previous Desktop session exists, its provider and model are restored
+   and the composer is activated. Otherwise select a provider and model, then
+   click `Create session`.
 5. Enter a prompt and click `Send`.
+6. Use `Switch project` to return to the launcher. The active project and
+   session selection are cleared, while persisted recent projects remain.
+
+The RAG block is a disabled design placeholder; this stage does not index or
+send project content to a retrieval service. Missing recent project paths are
+shown as unavailable and cannot be opened from the list.
 
 The gear button in the top-right opens editors for:
 
@@ -194,8 +214,12 @@ Install a local `via-agent` launcher:
 
 ```bash
 make desktop-install
-via-agent --working-dir /path/to/project
+via-agent
 ```
+
+Desktop `--working-dir` argument handling is planned but not implemented yet.
+Choose the directory from the startup screen. The console command below already
+supports `--working-dir`.
 
 The console command remains:
 

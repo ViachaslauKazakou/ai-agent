@@ -19,22 +19,60 @@
         <div class="status-wrap">
           <span id="thinking" class="thinking-indicator" hidden><i></i> Thinking</span>
           <span id="status" class="status">Starting service…</span>
-          <button id="settings" class="toolbar-button settings-button" type="button" title="Configuration" aria-label="Open configuration">⚙</button>
+          <button id="switch-project" class="toolbar-button" type="button" hidden>Switch project</button>
+          <button id="settings" class="toolbar-button settings-button" type="button" title="Configuration" aria-label="Open configuration" hidden>⚙</button>
         </div>
       </header>
 
-      <section class="workspace">
+      <section id="launcher" class="launcher" aria-labelledby="launcher-title">
+        <div class="launcher-intro">
+          <p class="eyebrow">CHOOSE AN OPERATING MODE</p>
+          <h2 id="launcher-title">What are we building today?</h2>
+          <p>Start with a project-aware agent or explore the next desktop workspaces.</p>
+        </div>
+        <div class="mode-grid" aria-label="Agent modes">
+          <button class="mode-card active" type="button" data-mode="chatbot">
+            <span class="mode-index">01</span><strong>Chat-bot</strong><small>Project-aware conversation</small>
+          </button>
+          <button class="mode-card" type="button" data-mode="assistant">
+            <span class="mode-index">02</span><strong>Assistant</strong><small>Mail, calendar and search</small>
+          </button>
+          <button class="mode-card" type="button" data-mode="tutor">
+            <span class="mode-index">03</span><strong>AI Tutor</strong><small>Live guided lessons</small>
+          </button>
+          <button class="mode-card" type="button" data-mode="coder">
+            <span class="mode-index">04</span><strong>Coder</strong><small>Files, diffs and runtime</small>
+          </button>
+        </div>
+        <div class="launch-grid">
+          <section class="launch-panel">
+            <div class="panel-heading"><span>Recent projects</span><span id="recent-count" class="count-badge">0</span></div>
+            <div id="recent-projects" class="recent-projects" aria-live="polite">
+              <span class="empty-state">Loading project history…</span>
+            </div>
+          </section>
+          <section class="launch-panel launch-project">
+            <p class="eyebrow">CHAT-BOT SETUP</p>
+            <h3>Open a workspace</h3>
+            <p id="launcher-feedback" class="launcher-feedback" aria-live="polite">Choose a recent project or select a directory.</p>
+            <label class="field-label" for="project-path">Project path</label>
+            <div class="path-picker">
+              <input id="project-path" type="text" value="." autocomplete="off" />
+              <button id="choose-project" class="secondary-button path-button" type="button">Choose…</button>
+            </div>
+            <button id="open-project" class="primary-button" type="button">Open project</button>
+            <div class="rag-preview" aria-disabled="true"><span>RAG KNOWLEDGE</span><strong>Indexing arrives in a later stage</strong></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="workspace" class="workspace" hidden>
         <aside class="sidebar">
           <div class="panel-heading">
             <span>Project</span>
             <button id="refresh" class="icon-button" type="button" title="Refresh capabilities">↻</button>
           </div>
-          <label class="field-label" for="project-path">Project path</label>
-          <div class="path-picker">
-            <input id="project-path" type="text" value="." autocomplete="off" />
-            <button id="choose-project" class="secondary-button path-button" type="button">Choose…</button>
-          </div>
-          <button id="open-project" class="primary-button" type="button">Open project</button>
+           <p id="active-project-path" class="active-project-path">No project selected</p>
           <label class="field-label session-label" for="provider">Provider</label>
           <select id="provider" class="select-input" disabled>
             <option value="">Open a project first</option>
@@ -79,7 +117,7 @@
           </form>
         </section>
       </section>
-      <footer class="bottom-dock">
+      <footer id="bottom-dock" class="bottom-dock" hidden>
         <details class="trace-panel">
           <summary>Execution log</summary>
           <pre id="trace" class="trace" aria-live="polite"></pre>

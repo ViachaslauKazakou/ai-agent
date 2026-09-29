@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::{
     AppError, Config, LaunchState, LaunchStateStore, LiteLlmProvider, OllamaProvider,
-    ProviderRegistry, Session,
+    ProviderRegistry, RecentSession, Session,
     agents::AgentCatalog,
     cli::Cli,
     tools::{ToolContext, registry_from_names},
@@ -54,6 +54,8 @@ pub struct StartupProjectDto {
     pub available: bool,
     /// UTC timestamp of the most recent successful open operation.
     pub last_opened_at: chrono::DateTime<Utc>,
+    /// Latest session metadata, when the project has a restorable session.
+    pub last_session: Option<SessionDto>,
 }
 
 /// Secret-free state required to render the desktop startup screen.
@@ -394,9 +396,35 @@ impl ApplicationService {
                     path: project.path.clone(),
                     available: project.path.is_dir(),
                     last_opened_at: project.last_opened_at,
+                    last_session: project.last_session.as_ref().map(|session| SessionDto {
+                        id: session.id,
+                        project_id: project.id.clone(),
+                        provider: session.provider.clone(),
+                        model: session.model.clone(),
+                        message_count: 0,
+                    }),
                 })
                 .collect(),
         }
+    }
+
+    /// Rehydrates secret-free session metadata after its project is opened.
+    fn restore_project_session(&mut self, project_id: &str) -> Option<SessionDto> {
+        let recent = self
+            .launch_state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)?;
+        let saved = recent.last_session.as_ref()?;
+        let session = SessionDto {
+            id: saved.id,
+            project_id: project_id.to_owned(),
+            provider: saved.provider.clone(),
+            model: saved.model.clone(),
+            message_count: 0,
+        };
+        self.sessions.insert(session.id, session.clone());
+        Some(session)
     }
 
     /// Returns the capabilities advertised by this service instance.
@@ -518,6 +546,24 @@ impl ApplicationService {
         };
         self.sessions.insert(session.id, session.clone());
         Ok(session)
+    }
+
+    /// Persists the selected session as the project's startup default.
+    fn persist_active_session(&mut self, session: &SessionDto) -> Result<(), AppError> {
+        let mut next_launch_state = self.launch_state.clone();
+        next_launch_state.record_session(
+            &session.project_id,
+            RecentSession {
+                id: session.id,
+                provider: session.provider.clone(),
+                model: session.model.clone(),
+            },
+        )?;
+        if let Some(store) = &self.launch_state_store {
+            store.save(&next_launch_state)?;
+        }
+        self.launch_state = next_launch_state;
+        Ok(())
     }
 
     /// Creates the runtime agent for a session using the same project-local
@@ -728,6 +774,7 @@ impl ApplicationService {
                     .find(|project| project.path == canonical)
                     .cloned()
                 {
+                    self.restore_project_session(&project.id);
                     return Ok(ApplicationEnvelope {
                         api_version: APPLICATION_API_VERSION,
                         request_id,
@@ -753,6 +800,7 @@ impl ApplicationService {
                 }
                 self.launch_state = next_launch_state;
                 self.projects.insert(project.id.clone(), project.clone());
+                self.restore_project_session(&project.id);
                 ApplicationEvent::ProjectOpened(project)
             }
             ApplicationCommand::ListProjects => ApplicationEvent::ProjectsListed {
@@ -766,6 +814,10 @@ impl ApplicationService {
                 let session = self
                     .create_session(&project_id, provider, model)
                     .map_err(AppError::InvalidConfig)?;
+                if let Err(error) = self.persist_active_session(&session) {
+                    self.sessions.remove(&session.id);
+                    return Err(error);
+                }
                 ApplicationEvent::SessionCreated(session)
             }
             ApplicationCommand::ListSessions { project_id } => {
@@ -970,6 +1022,50 @@ mod tests {
 
         assert_eq!(startup.recent_projects.len(), 1);
         assert!(!startup.recent_projects[0].available);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn latest_session_and_model_are_restored_when_project_reopens() {
+        let root = std::env::temp_dir().join(format!("ai-agent-session-state-{}", Uuid::new_v4()));
+        let project_path = root.join("project");
+        fs::create_dir_all(&project_path).unwrap();
+        let store = LaunchStateStore::new(root.join("user/state.json"));
+        let mut service = ApplicationService::with_launch_state_store(store.clone()).unwrap();
+        let opened = service
+            .execute(
+                Uuid::new_v4(),
+                ApplicationCommand::OpenProject {
+                    path: project_path.clone(),
+                },
+            )
+            .unwrap();
+        let ApplicationEvent::ProjectOpened(project) = opened.payload else {
+            panic!("expected project_opened event");
+        };
+        let created = service
+            .execute(
+                Uuid::new_v4(),
+                ApplicationCommand::CreateSession {
+                    project_id: project.id.clone(),
+                    provider: "litellm".to_owned(),
+                    model: "restored-model".to_owned(),
+                },
+            )
+            .unwrap();
+        let ApplicationEvent::SessionCreated(created) = created.payload else {
+            panic!("expected session_created event");
+        };
+
+        let mut reconstructed = ApplicationService::with_launch_state_store(store).unwrap();
+        reconstructed
+            .execute(
+                Uuid::new_v4(),
+                ApplicationCommand::OpenProject { path: project_path },
+            )
+            .unwrap();
+
+        assert_eq!(reconstructed.list_sessions(&project.id), vec![created]);
         fs::remove_dir_all(root).unwrap();
     }
 }

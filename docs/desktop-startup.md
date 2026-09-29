@@ -18,6 +18,11 @@ If the home directory cannot be resolved, the state file is malformed, or persis
 
 Opening an already registered canonical path returns the existing project instead of creating a duplicate runtime identifier. Persisted projects use the stable opaque identifier stored in launch state.
 
+Creating a Desktop session records its UUID, provider key, and model alongside
+the project's launch metadata. Reopening the project rehydrates that metadata
+into the service session map. Prompts and responses remain excluded until
+project-local session-history persistence is implemented.
+
 Missing recent project paths remain in startup metadata with `available: false`. This lets the launcher explain that a directory moved or was removed instead of silently losing history.
 
 ## Security boundary

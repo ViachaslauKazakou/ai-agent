@@ -4,9 +4,10 @@
   "version": "1.1.1",
   "type": "module",
   "scripts": {
-    "check": "node --check app.js",
+    "test": "node --test state.test.js",
+    "check": "node --check app.js && node --check state.js && npm test",
     "build": "vite build",
-    "dev": "vite --host 127.0.0.1 --port 1420"
+    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort --configLoader native"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

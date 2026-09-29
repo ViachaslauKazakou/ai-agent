@@ -81,6 +81,7 @@ impl LaunchState {
                 path: canonical_path,
                 last_opened_at: opened_at,
                 last_session_id: None,
+                last_session: None,
             });
 
         project.last_opened_at = opened_at;
@@ -88,6 +89,24 @@ impl LaunchState {
         self.projects.insert(0, project);
         self.projects.truncate(MAX_RECENT_PROJECTS);
         &self.projects[0]
+    }
+
+    /// Associates the latest desktop session with an existing project.
+    pub fn record_session(
+        &mut self,
+        project_id: &str,
+        session: RecentSession,
+    ) -> Result<(), AppError> {
+        let project = self
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+            .ok_or_else(|| AppError::LaunchState(format!("проект не найден: {project_id}")))?;
+        project.last_session_id = Some(session.id);
+        project.last_session = Some(session);
+        self.last_project_id = Some(project_id.to_owned());
+        self.last_session_id = project.last_session_id;
+        Ok(())
     }
 }
 
@@ -102,6 +121,20 @@ pub struct RecentProject {
     pub last_opened_at: DateTime<Utc>,
     /// Reserved link to the project's most recently selected session.
     pub last_session_id: Option<Uuid>,
+    /// Provider/model metadata required to restore the desktop session safely.
+    #[serde(default)]
+    pub last_session: Option<RecentSession>,
+}
+
+/// Secret-free metadata required to reactivate a project's latest session.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecentSession {
+    /// Stable UUID stored in the project-local session document.
+    pub id: Uuid,
+    /// Provider registry key paired with the selected model.
+    pub provider: String,
+    /// Model selected when the session was created.
+    pub model: String,
 }
 
 /// File-backed repository for user-scoped launch metadata.
