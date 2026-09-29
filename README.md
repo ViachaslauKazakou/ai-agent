@@ -458,8 +458,14 @@ rustc --version
 cargo --version
 ```
 
-Проект использует Rust edition 2024 и находится в каталоге
+Проект использует Rust edition 2024 для основного пакета и находится в каталоге
 `/Users/Viachaslau_Kazakou/Work/ai-agent`.
+
+Корневой `Cargo.toml` и desktop-пакет в `src-tauri/` входят в единый Cargo
+workspace. Это оставляет CLI/core и Tauri desktop отдельными пакетами, но
+использует общий `Cargo.lock` и общий dependency graph. Для проверок всего
+Rust-кода используйте `cargo check --workspace`, `cargo test --workspace` и
+`cargo fmt --all -- --check`.
 
 ## Сборка и установка
 

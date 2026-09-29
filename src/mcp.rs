@@ -166,6 +166,7 @@ async fn execute_server_tool_with_context(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{ALLOWED_EXTENSIONS, McpTool};
     use crate::tools::{Tool, ToolContext};
