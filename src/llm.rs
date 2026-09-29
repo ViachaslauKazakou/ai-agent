@@ -335,6 +335,7 @@ pub struct LiteLlmProvider {
     endpoint: String,
     models_endpoint: String,
     api_key: Option<String>,
+    forward_reasoning_allowlist: bool,
 }
 
 impl LiteLlmProvider {
@@ -355,6 +356,7 @@ impl LiteLlmProvider {
             endpoint,
             models_endpoint,
             api_key: config.api_key.clone(),
+            forward_reasoning_allowlist: true,
         })
     }
 
@@ -365,6 +367,7 @@ impl LiteLlmProvider {
             endpoint,
             models_endpoint: String::new(),
             api_key: None,
+            forward_reasoning_allowlist: true,
         }
     }
 
@@ -375,6 +378,7 @@ impl LiteLlmProvider {
             endpoint: String::new(),
             models_endpoint: endpoint,
             api_key: None,
+            forward_reasoning_allowlist: true,
         }
     }
 
@@ -413,6 +417,15 @@ impl LlmProvider for LiteLlmProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AppError> {
         let mut payload =
             serde_json::to_value(&request).map_err(|error| AppError::LlmJson(error.to_string()))?;
+        if self.forward_reasoning_allowlist && request.reasoning_effort.is_some() {
+            payload
+                .as_object_mut()
+                .expect("CompletionRequest serializes to an object")
+                .insert(
+                    "allowed_openai_params".to_owned(),
+                    serde_json::json!(["reasoning_effort"]),
+                );
+        }
         let mut last_response = None;
 
         // OpenAI-compatible gateways differ in both token-limit spelling and
@@ -442,6 +455,13 @@ impl LlmProvider for LiteLlmProvider {
                     last_response = Some(response);
                     continue;
                 }
+            }
+            if rejects_reasoning_effort(&response.body)
+                && object.remove("reasoning_effort").is_some()
+            {
+                object.remove("allowed_openai_params");
+                last_response = Some(response);
+                continue;
             }
             if supports_completion_token_alias(&response.body)
                 && let Some(max_tokens) = object.remove("max_tokens")
@@ -501,6 +521,14 @@ fn supports_reasoning_tool_alias(body: &str) -> bool {
         && (lower.contains("not supported") || lower.contains("set reasoning_effort"))
 }
 
+fn rejects_reasoning_effort(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("reasoning_effort")
+        && (lower.contains("unsupportedparamserror")
+            || lower.contains("unsupported parameter")
+            || lower.contains("does not support parameters"))
+}
+
 /// Клиент локального Ollama через его OpenAI-compatible API.
 ///
 /// Ollama обычно слушает `http://localhost:11434`; endpoint `/v1` используется
@@ -512,9 +540,9 @@ pub struct OllamaProvider {
 
 impl OllamaProvider {
     pub fn new(config: &Config) -> Result<Self, AppError> {
-        Ok(Self {
-            inner: LiteLlmProvider::new(config)?,
-        })
+        let mut inner = LiteLlmProvider::new(config)?;
+        inner.forward_reasoning_allowlist = false;
+        Ok(Self { inner })
     }
 
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, AppError> {
@@ -588,6 +616,19 @@ mod tests {
         ));
         assert!(!super::supports_reasoning_tool_alias(
             "Unsupported parameter: 'reasoning_effort'"
+        ));
+    }
+
+    #[test]
+    fn detects_provider_rejection_of_reasoning_effort() {
+        assert!(super::rejects_reasoning_effort(
+            "litellm.UnsupportedParamsError: openai does not support parameters: ['reasoning_effort']"
+        ));
+        assert!(super::rejects_reasoning_effort(
+            "Unsupported parameter: 'reasoning_effort'"
+        ));
+        assert!(!super::rejects_reasoning_effort(
+            "Function tools with reasoning_effort are not supported"
         ));
     }
 
@@ -707,6 +748,7 @@ mod tests {
             let (_, body) = raw_request.split_once("\r\n\r\n").unwrap();
             let payload: serde_json::Value = serde_json::from_str(body).unwrap();
             assert_eq!(payload["reasoning_effort"], "none");
+            assert_eq!(payload["allowed_openai_params"][0], "reasoning_effort");
             assert!(payload["tools"].is_array());
 
             let body = r#"{"choices":[{"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}]}"#;
