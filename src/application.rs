@@ -207,7 +207,13 @@ fn desktop_provider(config: &Config, name: &str) -> Result<DesktopProvider, AppE
     selected.api_base_url = provider.base_url.clone();
     selected.api_key = provider.api_key.clone();
     match provider.kind.as_str() {
-        "ollama" => Ok(DesktopProvider::Ollama(OllamaProvider::new(&selected)?)),
+        "ollama" => Ok(DesktopProvider::Ollama {
+            provider: OllamaProvider::new(&selected)?,
+            supports_reasoning_effort: provider.supports_reasoning_effort,
+            supports_reasoning_with_tools: provider.supports_reasoning_with_tools,
+            reasoning_effort_models: provider.reasoning_effort_models.clone(),
+            reasoning_with_tools_models: provider.reasoning_with_tools_models.clone(),
+        }),
         _ => Ok(DesktopProvider::LiteLlm {
             provider: LiteLlmProvider::new(&selected)?,
             supports_reasoning_effort: provider.supports_reasoning_effort,
@@ -236,7 +242,13 @@ enum DesktopProvider {
         reasoning_effort_models: Vec<String>,
         reasoning_with_tools_models: Vec<String>,
     },
-    Ollama(crate::OllamaProvider),
+    Ollama {
+        provider: crate::OllamaProvider,
+        supports_reasoning_effort: bool,
+        supports_reasoning_with_tools: bool,
+        reasoning_effort_models: Vec<String>,
+        reasoning_with_tools_models: Vec<String>,
+    },
 }
 
 #[async_trait::async_trait]
@@ -246,35 +258,41 @@ impl crate::LlmProvider for DesktopProvider {
         request: crate::CompletionRequest,
     ) -> Result<crate::CompletionResponse, AppError> {
         let mut request = request;
-        if let Self::LiteLlm {
+        let (
             supports_reasoning_effort,
             supports_reasoning_with_tools,
             reasoning_effort_models,
             reasoning_with_tools_models,
-            ..
-        } = self
-        {
-            let model_supports_effort = *supports_reasoning_effort
-                || reasoning_effort_models
-                    .iter()
-                    .any(|model| model == &request.model);
-            if !model_supports_effort {
-                // Omit `reasoning_effort: none`; affected LiteLLM Bedrock
-                // adapters dereference a missing `thinking` object for it.
-                request.reasoning_effort = None;
+        ) = match self {
+            Self::LiteLlm {
+                supports_reasoning_effort,
+                supports_reasoning_with_tools,
+                reasoning_effort_models,
+                reasoning_with_tools_models,
+                ..
             }
-            if request.tools.is_some()
-                && !(*supports_reasoning_with_tools
-                    || reasoning_with_tools_models
-                        .iter()
-                        .any(|model| model == &request.model))
-            {
-                request.reasoning_effort = None;
-            }
-        }
+            | Self::Ollama {
+                supports_reasoning_effort,
+                supports_reasoning_with_tools,
+                reasoning_effort_models,
+                reasoning_with_tools_models,
+                ..
+            } => (
+                *supports_reasoning_effort,
+                *supports_reasoning_with_tools,
+                reasoning_effort_models,
+                reasoning_with_tools_models,
+            ),
+        };
+        request.apply_reasoning_capabilities(
+            supports_reasoning_effort,
+            supports_reasoning_with_tools,
+            reasoning_effort_models,
+            reasoning_with_tools_models,
+        );
         match self {
             Self::LiteLlm { provider, .. } => provider.complete(request).await,
-            Self::Ollama(provider) => provider.complete(request).await,
+            Self::Ollama { provider, .. } => provider.complete(request).await,
         }
     }
 }

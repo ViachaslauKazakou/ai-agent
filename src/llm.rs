@@ -208,6 +208,35 @@ impl CompletionRequest {
             reasoning_effort: Some(reasoning_effort.into()),
         }
     }
+
+    /// Applies provider capabilities before serializing an OpenAI-compatible
+    /// request. Chat Completions routes that cannot combine reasoning and
+    /// function tools need an explicit `none`: omitting the field can make a
+    /// gateway reapply its model-level default effort.
+    pub fn apply_reasoning_capabilities(
+        &mut self,
+        supports_reasoning_effort: bool,
+        supports_reasoning_with_tools: bool,
+        reasoning_effort_models: &[String],
+        reasoning_with_tools_models: &[String],
+    ) {
+        let model_supports_effort = supports_reasoning_effort
+            || reasoning_effort_models
+                .iter()
+                .any(|model| model == &self.model);
+        if !model_supports_effort {
+            self.reasoning_effort = None;
+            return;
+        }
+
+        let model_supports_tools = supports_reasoning_with_tools
+            || reasoning_with_tools_models
+                .iter()
+                .any(|model| model == &self.model);
+        if self.tools.is_some() && !model_supports_tools && self.reasoning_effort.is_some() {
+            self.reasoning_effort = Some("none".to_owned());
+        }
+    }
 }
 
 /// Использование токенов, если оно возвращено провайдером.
@@ -384,18 +413,6 @@ impl LlmProvider for LiteLlmProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AppError> {
         let mut payload =
             serde_json::to_value(&request).map_err(|error| AppError::LlmJson(error.to_string()))?;
-        // Chat Completions providers commonly support reasoning_effort for a
-        // plain response but reject the same parameter when function tools
-        // are present. Tool execution is a separate request mode: keep
-        // reasoning_effort for normal turns and remove it before the first
-        // tool-enabled HTTP request instead of making an avoidable 400 round
-        // trip.
-        if request.tools.is_some() {
-            payload
-                .as_object_mut()
-                .expect("CompletionRequest serializes to an object")
-                .remove("reasoning_effort");
-        }
         let mut last_response = None;
 
         // OpenAI-compatible gateways differ in both token-limit spelling and
@@ -412,11 +429,19 @@ impl LlmProvider for LiteLlmProvider {
             let Some(object) = payload.as_object_mut() else {
                 break;
             };
-            if supports_reasoning_tool_alias(&response.body)
-                && object.remove("reasoning_effort").is_some()
-            {
-                last_response = Some(response);
-                continue;
+            if supports_reasoning_tool_alias(&response.body) {
+                let needs_retry = object
+                    .get("reasoning_effort")
+                    .and_then(Value::as_str)
+                    .is_some_and(|effort| effort != "none");
+                if needs_retry {
+                    object.insert(
+                        "reasoning_effort".to_owned(),
+                        Value::String("none".to_owned()),
+                    );
+                    last_response = Some(response);
+                    continue;
+                }
             }
             if supports_completion_token_alias(&response.body)
                 && let Some(max_tokens) = object.remove("max_tokens")
@@ -567,8 +592,8 @@ mod tests {
     }
 
     #[test]
-    fn tool_payload_omits_effort_before_http_request() {
-        let request = CompletionRequest::from_llm_messages(
+    fn incompatible_tool_requests_explicitly_disable_reasoning() {
+        let mut request = CompletionRequest::from_llm_messages(
             "gpt-6-luna",
             Vec::new(),
             vec![super::ToolDefinition::function(
@@ -578,18 +603,15 @@ mod tests {
             )],
             "high",
         );
-        let mut payload = serde_json::to_value(&request).unwrap();
-        if request.tools.is_some() {
-            payload.as_object_mut().unwrap().remove("reasoning_effort");
-        }
 
-        assert!(payload.get("reasoning_effort").is_none());
-        assert!(payload.get("tools").is_some());
+        request.apply_reasoning_capabilities(true, false, &[], &[]);
+
+        assert_eq!(request.reasoning_effort.as_deref(), Some("none"));
     }
 
     #[test]
-    fn tool_requests_preserve_configured_reasoning_effort_for_capable_provider() {
-        let request = CompletionRequest::from_llm_messages(
+    fn compatible_tool_requests_preserve_configured_reasoning_effort() {
+        let mut request = CompletionRequest::from_llm_messages(
             "reasoning-model",
             Vec::new(),
             vec![super::ToolDefinition::function(
@@ -599,12 +621,19 @@ mod tests {
             )],
             "high",
         );
+        request.apply_reasoning_capabilities(true, true, &[], &[]);
 
         assert_eq!(request.reasoning_effort.as_deref(), Some("high"));
-        assert_eq!(
-            serde_json::to_value(request).unwrap()["reasoning_effort"],
-            "high"
-        );
+    }
+
+    #[test]
+    fn unsupported_reasoning_is_omitted_entirely() {
+        let mut request =
+            CompletionRequest::from_llm_messages("plain-model", Vec::new(), Vec::new(), "medium");
+
+        request.apply_reasoning_capabilities(false, false, &[], &[]);
+
+        assert!(request.reasoning_effort.is_none());
     }
 
     #[test]
@@ -663,6 +692,46 @@ mod tests {
         let response = provider.complete(request).await.unwrap();
 
         assert_eq!(response.content(), Some("pong"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_sends_explicit_none_with_function_tools() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut raw_request = vec![0; 8192];
+            let bytes = stream.read(&mut raw_request).await.unwrap();
+            let raw_request = String::from_utf8_lossy(&raw_request[..bytes]);
+            let (_, body) = raw_request.split_once("\r\n\r\n").unwrap();
+            let payload: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(payload["reasoning_effort"], "none");
+            assert!(payload["tools"].is_array());
+
+            let body = r#"{"choices":[{"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let provider = LiteLlmProvider::with_endpoint(format!("http://{address}/chat/completions"));
+        let mut request = CompletionRequest::from_llm_messages(
+            "gpt-6-luna",
+            Vec::new(),
+            vec![super::ToolDefinition::function(
+                "test_tool",
+                "test",
+                json!({"type": "object"}),
+            )],
+            "high",
+        );
+        request.apply_reasoning_capabilities(true, false, &[], &[]);
+        provider.complete(request).await.unwrap();
+
         server.await.unwrap();
     }
 

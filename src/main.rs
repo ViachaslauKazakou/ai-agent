@@ -1403,18 +1403,12 @@ impl LlmProvider for ConfiguredProvider {
                 reasoning_with_tools_models,
             ),
         };
-        let model_supports_effort =
-            supports_effort || effort_models.iter().any(|model| model == &request.model);
-        let model_supports_tools =
-            supports_tools || tools_models.iter().any(|model| model == &request.model);
-        if !model_supports_effort {
-            // Omit the field entirely. Some LiteLLM/Bedrock versions still
-            // inspect `reasoning_effort: none` and dereference a missing
-            // `thinking` object, returning an internal 400 error.
-            request.reasoning_effort = None;
-        } else if request.tools.is_some() && !model_supports_tools {
-            request.reasoning_effort = None;
-        }
+        request.apply_reasoning_capabilities(
+            supports_effort,
+            supports_tools,
+            effort_models,
+            tools_models,
+        );
         match self {
             Self::LiteLlm { provider, .. } => provider.complete(request).await,
             Self::Ollama { provider, .. } => provider.complete(request).await,
