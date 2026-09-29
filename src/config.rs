@@ -104,6 +104,8 @@ struct JsonConfig {
     web_search_api_key: Option<String>,
 }
 
+type JsonStringMapping = (&'static str, fn(&JsonConfig) -> Option<String>);
+
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
@@ -280,7 +282,7 @@ impl Config {
             // used by the existing merge logic. Keeping this mapping in one
             // table makes adding a scalar setting less error-prone and keeps
             // all ordinary string fields consistent.
-            let string_mappings: [(&str, fn(&JsonConfig) -> Option<String>); 14] = [
+            let string_mappings: [JsonStringMapping; 14] = [
                 ("LLM_PROVIDER", |config| config.default_provider.clone()),
                 ("MODEL", |config| config.model.clone()),
                 ("REASONING_EFFORT", |config| config.reasoning_effort.clone()),
@@ -570,13 +572,12 @@ impl Config {
                 "search_emails".to_owned(),
             ]);
         }
-        if google_calendar_client_id.is_some() || cfg!(target_os = "macos") {
-            if !enabled_tools
+        if (google_calendar_client_id.is_some() || cfg!(target_os = "macos"))
+            && !enabled_tools
                 .iter()
                 .any(|tool| tool == "list_calendar_events")
-            {
-                enabled_tools.push("list_calendar_events".to_owned());
-            }
+        {
+            enabled_tools.push("list_calendar_events".to_owned());
         }
         if cfg!(target_os = "macos") {
             for tool in ["mcp_read_local_file", "mcp_web_search"] {

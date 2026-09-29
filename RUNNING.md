@@ -243,8 +243,8 @@ arguments, tool results, API keys, and OAuth tokens.
 ## Verification commands
 
 ```bash
-cargo fmt --check
-cargo test
-cargo check --manifest-path src-tauri/Cargo.toml
+cargo fmt --all -- --check
+cargo test --workspace
+cargo check --workspace
 cd frontend && npm run check && npm run build
 ```

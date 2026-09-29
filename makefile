@@ -113,22 +113,22 @@ run-litellm-installed:
 		$(BINARY) $(ARGS)
 
 check:
-	$(CARGO) check --manifest-path $(MANIFEST)
+	$(CARGO) check --workspace
 
 test:
-	$(CARGO) test --manifest-path $(MANIFEST)
+	$(CARGO) test --workspace
 
 fmt:
-	$(CARGO) fmt --manifest-path $(MANIFEST)
+	$(CARGO) fmt --all
 
 fmt-check:
-	$(CARGO) fmt --manifest-path $(MANIFEST) -- --check
+	$(CARGO) fmt --all -- --check
 
 clippy:
-	$(CARGO) clippy --manifest-path $(MANIFEST) --all-targets --all-features -- -D warnings
+	$(CARGO) clippy --workspace --all-targets --all-features -- -D warnings
 
 clean:
-	$(CARGO) clean --manifest-path $(MANIFEST)
+	$(CARGO) clean --workspace
 
 git:
 	git checkout main
