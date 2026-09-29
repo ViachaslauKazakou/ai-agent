@@ -27,6 +27,7 @@ Tauri IPC or a loopback browser transport.
 ## Current commands
 
 - `get_capabilities`
+- `get_startup_state`
 - `open_project`
 - `list_projects`
 - `create_session`
@@ -52,6 +53,18 @@ configuration code, loads `providers.json`, and keeps the resulting `Config`
 private in the service. The frontend receives only `ProviderDto` metadata. This
 avoids a second desktop-specific configuration parser and keeps CLI and desktop
 configuration behavior aligned.
+
+`get_startup_state` returns secret-free metadata loaded from the user-scoped
+launch-state document. Recent projects keep stable opaque IDs across desktop
+processes and include an `available` flag so a launcher can render moved or
+deleted paths without failing startup. Listing this state never initializes or
+modifies a project; `open_project` remains the explicit activation boundary.
+
+When Tauri starts, it constructs `ApplicationService` with a
+`LaunchStateStore`. A successful `open_project` loads project configuration
+before atomically recording the canonical path. Configuration or persistence
+errors therefore cannot leave a partially registered runtime project. See
+`docs/desktop-startup.md` for the complete sequence and fallback behavior.
 
 `refresh_models` must be used after opening a project to query the configured
 provider endpoints. `list_models` returns only the registry allowlist; it does

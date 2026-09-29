@@ -8,6 +8,7 @@ use ai_agent::application::{
     ApplicationCommand, ApplicationEnvelope, ApplicationEvent, ApplicationService,
     SettingsDocuments,
 };
+use ai_agent::LaunchStateStore;
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::Mutex;
@@ -138,8 +139,9 @@ fn tool_activity(activity: State<'_, DesktopActivity>) -> Option<String> {
 
 /// Returns the Tauri application and registers the stateful command adapter.
 fn main() {
+    let service = desktop_service();
     tauri::Builder::default()
-        .manage(DesktopState(Mutex::new(ApplicationService::new())))
+        .manage(DesktopState(Mutex::new(service)))
         .manage(DesktopActivity(Arc::new(std::sync::Mutex::new(None))))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -152,4 +154,26 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running ai-agent desktop application");
+}
+
+/// Builds the desktop service with user-scoped startup persistence.
+///
+/// A damaged or unavailable state file must not make the desktop binary
+/// unusable. The original file is preserved by `LaunchStateStore`; this launch
+/// falls back to memory-only state and reports the diagnostic to stderr.
+fn desktop_service() -> ApplicationService {
+    let store = match LaunchStateStore::in_user_home() {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("[desktop] launch state disabled: {error}");
+            return ApplicationService::new();
+        }
+    };
+    match ApplicationService::with_launch_state_store(store) {
+        Ok(service) => service,
+        Err(error) => {
+            eprintln!("[desktop] launch state disabled: {error}");
+            ApplicationService::new()
+        }
+    }
 }

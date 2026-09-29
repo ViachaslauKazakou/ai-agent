@@ -14,12 +14,14 @@ use std::{
     },
 };
 
+use chrono::Utc;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    AppError, Config, LiteLlmProvider, OllamaProvider, ProviderRegistry, Session,
+    AppError, Config, LaunchState, LaunchStateStore, LiteLlmProvider, OllamaProvider,
+    ProviderRegistry, Session,
     agents::AgentCatalog,
     cli::Cli,
     tools::{ToolContext, registry_from_names},
@@ -35,10 +37,34 @@ pub const APPLICATION_API_VERSION: u16 = 1;
 /// Small, secret-free description of a project opened by the client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectDto {
-    /// Stable identifier assigned by the service for the current process.
+    /// Opaque identifier stable across launches when persistence is configured.
     pub id: String,
     /// Canonical project path displayed by the client.
     pub path: PathBuf,
+}
+
+/// Persisted project metadata rendered by a desktop startup screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartupProjectDto {
+    /// Stable opaque identifier from the launch-state document.
+    pub id: String,
+    /// Last canonical path recorded for the project.
+    pub path: PathBuf,
+    /// Whether the path currently resolves to an accessible directory.
+    pub available: bool,
+    /// UTC timestamp of the most recent successful open operation.
+    pub last_opened_at: chrono::DateTime<Utc>,
+}
+
+/// Secret-free state required to render the desktop startup screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartupStateDto {
+    /// UTC timestamp of the previous or current recorded application launch.
+    pub last_started_at: Option<chrono::DateTime<Utc>>,
+    /// Stable identifier of the project suggested to the user.
+    pub suggested_project_id: Option<String>,
+    /// Persisted projects ordered from most recently opened to least recent.
+    pub recent_projects: Vec<StartupProjectDto>,
 }
 
 /// Secret-free representation of a session available to the UI.
@@ -80,6 +106,8 @@ pub struct ApplicationCapabilities {
 pub enum ApplicationCommand {
     /// Ask the backend for its supported protocol features.
     GetCapabilities,
+    /// Return persisted, secret-free metadata for the startup screen.
+    GetStartupState,
     /// Register a project path for later session commands.
     OpenProject { path: PathBuf },
     /// Return projects already registered in this service instance.
@@ -112,6 +140,8 @@ pub enum ApplicationCommand {
 pub enum ApplicationEvent {
     /// Response containing the backend feature set.
     Capabilities(ApplicationCapabilities),
+    /// Persisted metadata required by the desktop startup screen.
+    StartupState(StartupStateDto),
     /// Project was accepted and is ready for session creation.
     ProjectOpened(ProjectDto),
     /// Projects currently registered in the service.
@@ -193,6 +223,10 @@ pub struct ApplicationService {
     agents: BTreeMap<Uuid, DesktopAgent>,
     next_sequence: u64,
     cancellations: BTreeMap<Uuid, RequestCancellation>,
+    /// User-scoped metadata is kept separate from project configuration.
+    launch_state: LaunchState,
+    /// The store is optional so embedded clients and tests remain filesystem-free.
+    launch_state_store: Option<LaunchStateStore>,
 }
 
 /// Selects the configured provider implementation while keeping credentials
@@ -330,6 +364,41 @@ impl ApplicationService {
         Self::default()
     }
 
+    /// Creates a service backed by persistent user-scoped launch metadata.
+    ///
+    /// Loading and recording the launch happen here so every desktop transport
+    /// observes the same startup state. An invalid document is returned to the
+    /// composition root instead of being overwritten or hidden.
+    pub fn with_launch_state_store(store: LaunchStateStore) -> Result<Self, AppError> {
+        let mut launch_state = store.load()?;
+        launch_state.record_launch(Utc::now());
+        store.save(&launch_state)?;
+        Ok(Self {
+            launch_state,
+            launch_state_store: Some(store),
+            ..Self::default()
+        })
+    }
+
+    /// Returns current startup metadata without opening or initializing projects.
+    pub fn startup_state(&self) -> StartupStateDto {
+        StartupStateDto {
+            last_started_at: self.launch_state.last_started_at,
+            suggested_project_id: self.launch_state.last_project_id.clone(),
+            recent_projects: self
+                .launch_state
+                .projects
+                .iter()
+                .map(|project| StartupProjectDto {
+                    id: project.id.clone(),
+                    path: project.path.clone(),
+                    available: project.path.is_dir(),
+                    last_opened_at: project.last_opened_at,
+                })
+                .collect(),
+        }
+    }
+
     /// Returns the capabilities advertised by this service instance.
     pub fn capabilities(&self) -> ApplicationCapabilities {
         ApplicationCapabilities {
@@ -414,6 +483,9 @@ impl ApplicationService {
     /// transport adapters must pass the validated path they received from that
     /// layer rather than duplicating path policy here.
     pub fn open_project(&mut self, path: PathBuf) -> ProjectDto {
+        if let Some(project) = self.projects.values().find(|project| project.path == path) {
+            return project.clone();
+        }
         let id = format!("project-{}", self.projects.len() + 1);
         let project = ProjectDto {
             id: id.clone(),
@@ -638,6 +710,9 @@ impl ApplicationService {
             ApplicationCommand::GetCapabilities => {
                 ApplicationEvent::Capabilities(self.capabilities())
             }
+            ApplicationCommand::GetStartupState => {
+                ApplicationEvent::StartupState(self.startup_state())
+            }
             ApplicationCommand::OpenProject { path } => {
                 if !path.is_dir() {
                     return Err(AppError::InvalidWorkingDirectory(
@@ -647,8 +722,37 @@ impl ApplicationService {
                 let canonical = path.canonicalize().map_err(|error| {
                     AppError::InvalidWorkingDirectory(format!("{}: {error}", path.display()))
                 })?;
-                let project = self.open_project(canonical);
+                if let Some(project) = self
+                    .projects
+                    .values()
+                    .find(|project| project.path == canonical)
+                    .cloned()
+                {
+                    return Ok(ApplicationEnvelope {
+                        api_version: APPLICATION_API_VERSION,
+                        request_id,
+                        sequence: self.next_sequence(),
+                        payload: ApplicationEvent::ProjectOpened(project),
+                    });
+                }
+
+                // Mutate a snapshot first. Failed configuration or persistence
+                // must not expose a partially registered project to clients.
+                let mut next_launch_state = self.launch_state.clone();
+                let recent = next_launch_state.record_project(canonical.clone(), Utc::now());
+                let project = ProjectDto {
+                    id: recent.id.clone(),
+                    path: canonical,
+                };
                 self.load_project_config(&project)?;
+                if let Some(store) = &self.launch_state_store
+                    && let Err(error) = store.save(&next_launch_state)
+                {
+                    self.configs.remove(&project.id);
+                    return Err(error);
+                }
+                self.launch_state = next_launch_state;
+                self.projects.insert(project.id.clone(), project.clone());
                 ApplicationEvent::ProjectOpened(project)
             }
             ApplicationCommand::ListProjects => ApplicationEvent::ProjectsListed {
@@ -727,7 +831,8 @@ mod tests {
     use super::{
         APPLICATION_API_VERSION, ApplicationCommand, ApplicationEvent, ApplicationService,
     };
-    use std::path::PathBuf;
+    use crate::LaunchStateStore;
+    use std::{fs, path::PathBuf};
     use uuid::Uuid;
 
     #[test]
@@ -739,6 +844,14 @@ mod tests {
 
         assert_eq!(json["type"], "open_project");
         assert_eq!(json["payload"]["path"], "/tmp/project");
+        assert_eq!(APPLICATION_API_VERSION, 1);
+    }
+
+    #[test]
+    fn startup_command_serialization_is_additive() {
+        let json = serde_json::to_value(ApplicationCommand::GetStartupState).unwrap();
+
+        assert_eq!(json["type"], "get_startup_state");
         assert_eq!(APPLICATION_API_VERSION, 1);
     }
 
@@ -800,5 +913,63 @@ mod tests {
         assert!(cancellation.is_cancelled());
         service.finish_request(request_id);
         assert!(!service.cancel_request(request_id));
+    }
+
+    #[test]
+    fn persisted_project_is_available_after_service_reconstruction() {
+        let root = std::env::temp_dir().join(format!("ai-agent-app-state-{}", Uuid::new_v4()));
+        let project_path = root.join("project");
+        fs::create_dir_all(&project_path).unwrap();
+        let store = LaunchStateStore::new(root.join("user/state.json"));
+        let mut service = ApplicationService::with_launch_state_store(store.clone()).unwrap();
+
+        let opened = service
+            .execute(
+                Uuid::new_v4(),
+                ApplicationCommand::OpenProject {
+                    path: project_path.clone(),
+                },
+            )
+            .unwrap();
+        let ApplicationEvent::ProjectOpened(opened_project) = opened.payload else {
+            panic!("expected project_opened event");
+        };
+
+        let mut reconstructed = ApplicationService::with_launch_state_store(store).unwrap();
+        let startup = reconstructed
+            .execute(Uuid::new_v4(), ApplicationCommand::GetStartupState)
+            .unwrap();
+        let ApplicationEvent::StartupState(startup) = startup.payload else {
+            panic!("expected startup_state event");
+        };
+
+        assert_eq!(startup.recent_projects.len(), 1);
+        assert_eq!(startup.recent_projects[0].id, opened_project.id);
+        assert_eq!(
+            startup.recent_projects[0].path,
+            project_path.canonicalize().unwrap()
+        );
+        assert!(startup.recent_projects[0].available);
+        assert_eq!(startup.suggested_project_id, Some(opened_project.id));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn startup_state_marks_missing_project_unavailable() {
+        let root = std::env::temp_dir().join(format!("ai-agent-stale-state-{}", Uuid::new_v4()));
+        let project_path = root.join("project");
+        fs::create_dir_all(&project_path).unwrap();
+        let store = LaunchStateStore::new(root.join("user/state.json"));
+        store
+            .record_project_opened(&project_path, chrono::Utc::now())
+            .unwrap();
+        fs::remove_dir_all(&project_path).unwrap();
+
+        let service = ApplicationService::with_launch_state_store(store).unwrap();
+        let startup = service.startup_state();
+
+        assert_eq!(startup.recent_projects.len(), 1);
+        assert!(!startup.recent_projects[0].available);
+        fs::remove_dir_all(root).unwrap();
     }
 }
