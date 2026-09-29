@@ -356,18 +356,28 @@ impl LiteLlmProvider {
             endpoint,
             models_endpoint,
             api_key: config.api_key.clone(),
-            forward_reasoning_allowlist: true,
+            // `allowed_openai_params` is a LiteLLM proxy extension. Native
+            // OpenAI-compatible APIs reject it as an unknown parameter.
+            forward_reasoning_allowlist: config.provider.eq_ignore_ascii_case("litellm"),
         })
     }
 
     #[cfg(test)]
     fn with_endpoint(endpoint: String) -> Self {
+        Self::with_endpoint_and_reasoning_allowlist(endpoint, true)
+    }
+
+    #[cfg(test)]
+    fn with_endpoint_and_reasoning_allowlist(
+        endpoint: String,
+        forward_reasoning_allowlist: bool,
+    ) -> Self {
         Self {
             client: reqwest::Client::new(),
             endpoint,
             models_endpoint: String::new(),
             api_key: None,
-            forward_reasoning_allowlist: true,
+            forward_reasoning_allowlist,
         }
     }
 
@@ -442,6 +452,12 @@ impl LlmProvider for LiteLlmProvider {
             let Some(object) = payload.as_object_mut() else {
                 break;
             };
+            if rejects_allowed_openai_params(&response.body)
+                && object.remove("allowed_openai_params").is_some()
+            {
+                last_response = Some(response);
+                continue;
+            }
             if supports_reasoning_tool_alias(&response.body) {
                 let needs_retry = object
                     .get("reasoning_effort")
@@ -519,6 +535,12 @@ fn supports_reasoning_tool_alias(body: &str) -> bool {
     lower.contains("function tools")
         && lower.contains("reasoning_effort")
         && (lower.contains("not supported") || lower.contains("set reasoning_effort"))
+}
+
+fn rejects_allowed_openai_params(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("allowed_openai_params")
+        && (lower.contains("unknown parameter") || lower.contains("unsupported parameter"))
 }
 
 fn rejects_reasoning_effort(body: &str) -> bool {
@@ -629,6 +651,16 @@ mod tests {
         ));
         assert!(!super::rejects_reasoning_effort(
             "Function tools with reasoning_effort are not supported"
+        ));
+    }
+
+    #[test]
+    fn detects_native_api_rejection_of_litellm_parameter() {
+        assert!(super::rejects_allowed_openai_params(
+            "Unknown parameter: 'allowed_openai_params'."
+        ));
+        assert!(!super::rejects_allowed_openai_params(
+            "Unsupported parameter: 'reasoning_effort'."
         ));
     }
 
@@ -761,6 +793,50 @@ mod tests {
         });
 
         let provider = LiteLlmProvider::with_endpoint(format!("http://{address}/chat/completions"));
+        let mut request = CompletionRequest::from_llm_messages(
+            "gpt-6-luna",
+            Vec::new(),
+            vec![super::ToolDefinition::function(
+                "test_tool",
+                "test",
+                json!({"type": "object"}),
+            )],
+            "high",
+        );
+        request.apply_reasoning_capabilities(true, false, &[], &[]);
+        provider.complete(request).await.unwrap();
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_openai_client_omits_litellm_reasoning_allowlist() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut raw_request = vec![0; 8192];
+            let bytes = stream.read(&mut raw_request).await.unwrap();
+            let raw_request = String::from_utf8_lossy(&raw_request[..bytes]);
+            let (_, body) = raw_request.split_once("\r\n\r\n").unwrap();
+            let payload: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(payload["reasoning_effort"], "none");
+            assert!(payload.get("allowed_openai_params").is_none());
+            assert!(payload["tools"].is_array());
+
+            let body = r#"{"choices":[{"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let provider = LiteLlmProvider::with_endpoint_and_reasoning_allowlist(
+            format!("http://{address}/chat/completions"),
+            false,
+        );
         let mut request = CompletionRequest::from_llm_messages(
             "gpt-6-luna",
             Vec::new(),
