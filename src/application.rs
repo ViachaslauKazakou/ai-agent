@@ -258,13 +258,17 @@ impl crate::LlmProvider for DesktopProvider {
                 || reasoning_effort_models
                     .iter()
                     .any(|model| model == &request.model);
-            let model_supports_tools = *supports_reasoning_with_tools
-                || reasoning_with_tools_models
-                    .iter()
-                    .any(|model| model == &request.model);
-            if !model_supports_effort || (request.tools.is_some() && !model_supports_tools) {
+            if !model_supports_effort {
                 // Omit `reasoning_effort: none`; affected LiteLLM Bedrock
                 // adapters dereference a missing `thinking` object for it.
+                request.reasoning_effort = None;
+            }
+            if request.tools.is_some()
+                && !(*supports_reasoning_with_tools
+                    || reasoning_with_tools_models
+                        .iter()
+                        .any(|model| model == &request.model))
+            {
                 request.reasoning_effort = None;
             }
         }

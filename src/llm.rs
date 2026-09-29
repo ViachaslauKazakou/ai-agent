@@ -382,32 +382,98 @@ impl LiteLlmProvider {
 #[async_trait]
 impl LlmProvider for LiteLlmProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AppError> {
-        let mut builder = self.client.post(&self.endpoint).json(&request);
+        let mut payload =
+            serde_json::to_value(&request).map_err(|error| AppError::LlmJson(error.to_string()))?;
+        // Chat Completions providers commonly support reasoning_effort for a
+        // plain response but reject the same parameter when function tools
+        // are present. Tool execution is a separate request mode: keep
+        // reasoning_effort for normal turns and remove it before the first
+        // tool-enabled HTTP request instead of making an avoidable 400 round
+        // trip.
+        if request.tools.is_some() {
+            payload
+                .as_object_mut()
+                .expect("CompletionRequest serializes to an object")
+                .remove("reasoning_effort");
+        }
+        let mut last_response = None;
+
+        // OpenAI-compatible gateways differ in both token-limit spelling and
+        // reasoning/tool support. Retry only explicit capability errors, so a
+        // real provider failure is returned immediately and never duplicated.
+        for _ in 0..3 {
+            let response = self.send_completion_payload(payload.clone()).await?;
+            if (200..300).contains(&response.status) {
+                let api_response: ApiResponse = serde_json::from_str(&response.body)
+                    .map_err(|error| AppError::LlmJson(error.to_string()))?;
+                return api_response.try_into();
+            }
+
+            let Some(object) = payload.as_object_mut() else {
+                break;
+            };
+            if supports_reasoning_tool_alias(&response.body)
+                && object.remove("reasoning_effort").is_some()
+            {
+                last_response = Some(response);
+                continue;
+            }
+            if supports_completion_token_alias(&response.body)
+                && let Some(max_tokens) = object.remove("max_tokens")
+            {
+                object.insert("max_completion_tokens".to_owned(), max_tokens);
+                last_response = Some(response);
+                continue;
+            }
+            last_response = Some(response);
+            break;
+        }
+
+        let response = last_response.expect("completion request always has a response");
+        Err(AppError::LlmHttp {
+            status: response.status,
+            message: truncate_for_error(&response.body),
+        })
+    }
+}
+
+struct CompletionHttpResponse {
+    status: u16,
+    body: String,
+}
+
+impl LiteLlmProvider {
+    async fn send_completion_payload(
+        &self,
+        payload: Value,
+    ) -> Result<CompletionHttpResponse, AppError> {
+        let mut builder = self.client.post(&self.endpoint).json(&payload);
         if let Some(api_key) = &self.api_key {
             builder = builder.header(header::AUTHORIZATION, format!("Bearer {api_key}"));
         }
-
         let response = builder
             .send()
             .await
             .map_err(|error| AppError::LlmNetwork(error.to_string()))?;
-        let status = response.status();
+        let status = response.status().as_u16();
         let body = response
             .text()
             .await
             .map_err(|error| AppError::LlmNetwork(error.to_string()))?;
-
-        if !status.is_success() {
-            return Err(AppError::LlmHttp {
-                status: status.as_u16(),
-                message: truncate_for_error(&body),
-            });
-        }
-
-        let api_response: ApiResponse =
-            serde_json::from_str(&body).map_err(|error| AppError::LlmJson(error.to_string()))?;
-        api_response.try_into()
+        Ok(CompletionHttpResponse { status, body })
     }
+}
+
+fn supports_completion_token_alias(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("max_tokens") && lower.contains("max_completion_tokens")
+}
+
+fn supports_reasoning_tool_alias(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("function tools")
+        && lower.contains("reasoning_effort")
+        && (lower.contains("not supported") || lower.contains("set reasoning_effort"))
 }
 
 /// Клиент локального Ollama через его OpenAI-compatible API.
@@ -478,6 +544,47 @@ mod tests {
             request.max_tokens,
             Some(CompletionRequest::MIN_PROVIDER_MAX_TOKENS)
         );
+    }
+
+    #[test]
+    fn detects_explicit_provider_token_parameter_error() {
+        assert!(super::supports_completion_token_alias(
+            "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens' instead"
+        ));
+        assert!(!super::supports_completion_token_alias(
+            "Unsupported parameter: 'temperature'"
+        ));
+    }
+
+    #[test]
+    fn detects_reasoning_tools_capability_error() {
+        assert!(super::supports_reasoning_tool_alias(
+            "Function tools with reasoning_effort are not supported for this model"
+        ));
+        assert!(!super::supports_reasoning_tool_alias(
+            "Unsupported parameter: 'reasoning_effort'"
+        ));
+    }
+
+    #[test]
+    fn tool_payload_omits_effort_before_http_request() {
+        let request = CompletionRequest::from_llm_messages(
+            "gpt-6-luna",
+            Vec::new(),
+            vec![super::ToolDefinition::function(
+                "test_tool",
+                "test",
+                json!({"type": "object"}),
+            )],
+            "high",
+        );
+        let mut payload = serde_json::to_value(&request).unwrap();
+        if request.tools.is_some() {
+            payload.as_object_mut().unwrap().remove("reasoning_effort");
+        }
+
+        assert!(payload.get("reasoning_effort").is_none());
+        assert!(payload.get("tools").is_some());
     }
 
     #[test]

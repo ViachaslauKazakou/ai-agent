@@ -64,146 +64,13 @@ async fn call_server(
     args: Value,
     context: &ToolContext,
 ) -> Result<ToolResult, AppError> {
-    // Run each call in a short-lived child so the MCP stdio stream stays
-    // isolated from the interactive agent process.
-    let executable = std::env::current_exe().map_err(|e| AppError::Tool(e.to_string()))?;
-    let mut child = Command::new(executable)
-        .arg("--mcp-server")
-        .current_dir(&context.working_dir)
-        .env("AI_AGENT_MCP_ROOT", &context.working_dir)
-        .env(
-            "AI_AGENT_WEB_SEARCH_PROVIDER",
-            context
-                .web_search_provider
-                .as_deref()
-                .unwrap_or("duckduckgo"),
-        )
-        .env(
-            "AI_AGENT_WEB_SEARCH_ENDPOINT",
-            context.web_search_endpoint.as_deref().unwrap_or(""),
-        )
-        .env(
-            "AI_AGENT_WEB_SEARCH_API_KEY",
-            context.web_search_api_key.as_deref().unwrap_or(""),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| AppError::Tool(format!("MCP server не запустился: {e}")))?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| AppError::Tool("MCP stdin недоступен".into()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AppError::Tool("MCP stdout недоступен".into()))?;
-    let mut lines = BufReader::new(stdout).lines();
-    send(&mut stdin, 1, "initialize", json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ai-agent","version":env!("CARGO_PKG_VERSION")}})).await?;
-    let _ = next_response(&mut lines, 1).await?;
-    send_notification(&mut stdin, "notifications/initialized", json!({})).await?;
-    send(
-        &mut stdin,
-        2,
-        "tools/call",
-        json!({"name":name,"arguments":args,"working_dir":context.working_dir}),
-    )
-    .await?;
-    let response = next_response(&mut lines, 2).await?;
-    let _ = child.kill().await;
-    if let Some(error) = response.get("error") {
-        return Err(AppError::Tool(format!("MCP error: {error}")));
-    }
-    let result = response
-        .get("result")
-        .cloned()
-        .unwrap_or_else(|| json!({"isError":true,"content":[]}));
-    let is_error = result
-        .get("isError")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let content = result
-        .get("content")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("text").and_then(Value::as_str))
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_else(|| result.to_string());
-    if is_error {
-        Err(AppError::Tool(content))
-    } else {
-        Ok(ToolResult::success(content))
-    }
-}
-
-async fn send(
-    stdin: &mut tokio::process::ChildStdin,
-    id: u64,
-    method: &str,
-    params: Value,
-) -> Result<(), AppError> {
-    let message = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
-    stdin
-        .write_all(message.to_string().as_bytes())
-        .await
-        .map_err(|e| AppError::Tool(e.to_string()))?;
-    stdin
-        .write_all(b"\n")
-        .await
-        .map_err(|e| AppError::Tool(e.to_string()))?;
-    stdin
-        .flush()
-        .await
-        .map_err(|e| AppError::Tool(e.to_string()))
-}
-
-async fn send_notification(
-    stdin: &mut tokio::process::ChildStdin,
-    method: &str,
-    params: Value,
-) -> Result<(), AppError> {
-    stdin
-        .write_all(
-            json!({"jsonrpc":"2.0","method":method,"params":params})
-                .to_string()
-                .as_bytes(),
-        )
-        .await
-        .map_err(|e| AppError::Tool(e.to_string()))?;
-    stdin
-        .write_all(b"\n")
-        .await
-        .map_err(|e| AppError::Tool(e.to_string()))?;
-    stdin
-        .flush()
-        .await
-        .map_err(|e| AppError::Tool(e.to_string()))
-}
-
-async fn next_response(
-    lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
-    id: u64,
-) -> Result<Value, AppError> {
-    while let Some(line) = lines
-        .next_line()
-        .await
-        .map_err(|e| AppError::Tool(e.to_string()))?
-    {
-        let value: Value =
-            serde_json::from_str(&line).map_err(|e| AppError::Tool(format!("MCP JSON: {e}")))?;
-        if value.get("id").and_then(Value::as_u64) == Some(id) {
-            return Ok(value);
-        }
-    }
-    Err(AppError::Tool(
-        "MCP server завершил работу без ответа".into(),
-    ))
+    // The desktop executable is a Tauri process, not the CLI binary. Spawning
+    // `current_exe --mcp-server` from it starts a second GUI process and can
+    // make the desktop client disappear. Keep the MCP implementation shared,
+    // but execute the local server handler in-process for both clients.
+    let content =
+        execute_server_tool_with_context(json!({"name": name, "arguments": args}), context).await?;
+    Ok(ToolResult::success(content))
 }
 
 pub async fn run_server() -> Result<(), AppError> {
@@ -261,22 +128,48 @@ pub async fn run_server() -> Result<(), AppError> {
 }
 
 async fn execute_server_tool(params: Value) -> Result<String, AppError> {
+    let root = std::env::var_os("AI_AGENT_MCP_ROOT")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| AppError::Tool("MCP root не задан".into()))?;
+    let mut context = ToolContext::new(root, false);
+    context.web_search_provider = std::env::var("AI_AGENT_WEB_SEARCH_PROVIDER").ok();
+    context.web_search_endpoint = std::env::var("AI_AGENT_WEB_SEARCH_ENDPOINT").ok();
+    context.web_search_api_key = std::env::var("AI_AGENT_WEB_SEARCH_API_KEY").ok();
+    execute_server_tool_with_context(params, &context).await
+}
+
+async fn execute_server_tool_with_context(
+    params: Value,
+    context: &ToolContext,
+) -> Result<String, AppError> {
     match params
         .get("name")
         .and_then(Value::as_str)
         .unwrap_or_default()
     {
         "mcp_read_local_file" => {
-            read_local_file(params.get("arguments").cloned().unwrap_or_default()).await
+            read_local_file(
+                params.get("arguments").cloned().unwrap_or_default(),
+                context,
+            )
+            .await
         }
-        "mcp_web_search" => web_search(params.get("arguments").cloned().unwrap_or_default()).await,
+        "mcp_web_search" => {
+            web_search(
+                params.get("arguments").cloned().unwrap_or_default(),
+                context,
+            )
+            .await
+        }
         name => Err(AppError::Tool(format!("MCP tool not found: {name}"))),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ALLOWED_EXTENSIONS;
+    use super::{ALLOWED_EXTENSIONS, McpTool};
+    use crate::tools::{Tool, ToolContext};
+    use serde_json::json;
 
     #[test]
     fn allows_only_document_extensions() {
@@ -285,13 +178,22 @@ mod tests {
         assert!(!ALLOWED_EXTENSIONS.contains(&"exe"));
         assert!(!ALLOWED_EXTENSIONS.contains(&"png"));
     }
+
+    #[tokio::test]
+    async fn web_search_returns_validation_error_without_spawning_a_client_process() {
+        let context = ToolContext::new(std::env::temp_dir(), false);
+        let error = McpTool::web_search()
+            .execute(json!({"query": "  "}), &context)
+            .await
+            .expect_err("blank query must be rejected");
+
+        assert!(error.to_string().contains("query обязателен"));
+    }
 }
 
-async fn read_local_file(args: Value) -> Result<String, AppError> {
+async fn read_local_file(args: Value, context: &ToolContext) -> Result<String, AppError> {
     // Canonicalization prevents `..` and symlink traversal outside the root.
-    let root = std::env::var_os("AI_AGENT_MCP_ROOT")
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| AppError::Tool("MCP root не задан".into()))?;
+    let root = &context.working_dir;
     let path = root.join(
         args.get("path")
             .and_then(Value::as_str)
@@ -386,7 +288,7 @@ async fn command_text(program: &str, args: &[&str]) -> Result<String, AppError> 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-async fn web_search(args: Value) -> Result<String, AppError> {
+async fn web_search(args: Value, context: &ToolContext) -> Result<String, AppError> {
     // Web pages are untrusted data. Opening browser tabs is opt-in only.
     let query = args
         .get("query")
@@ -398,11 +300,13 @@ async fn web_search(args: Value) -> Result<String, AppError> {
         .and_then(Value::as_u64)
         .unwrap_or(5)
         .clamp(1, 10);
-    let provider =
-        std::env::var("AI_AGENT_WEB_SEARCH_PROVIDER").unwrap_or_else(|_| "duckduckgo".into());
-    let links = match provider.as_str() {
+    let provider = context
+        .web_search_provider
+        .as_deref()
+        .unwrap_or("duckduckgo");
+    let links = match provider {
         "duckduckgo" => duckduckgo_search(query, max).await?,
-        "tavily" => tavily_search(query, max).await?,
+        "tavily" => tavily_search(query, max, context).await?,
         other => {
             return Err(AppError::Tool(format!(
                 "неподдерживаемый WEB_SEARCH_PROVIDER: {other}"
@@ -477,13 +381,19 @@ async fn duckduckgo_search(query: &str, max: u64) -> Result<Vec<String>, AppErro
         .collect())
 }
 
-async fn tavily_search(query: &str, max: u64) -> Result<Vec<String>, AppError> {
-    let key = std::env::var("AI_AGENT_WEB_SEARCH_API_KEY")
-        .ok()
+async fn tavily_search(
+    query: &str,
+    max: u64,
+    context: &ToolContext,
+) -> Result<Vec<String>, AppError> {
+    let key = context
+        .web_search_api_key
+        .clone()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::Tool("Tavily требует WEB_SEARCH_API_KEY".into()))?;
-    let endpoint = std::env::var("AI_AGENT_WEB_SEARCH_ENDPOINT")
-        .ok()
+    let endpoint = context
+        .web_search_endpoint
+        .clone()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "https://api.tavily.com/search".into());
     let response: Value = reqwest::Client::new()
