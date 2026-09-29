@@ -14,6 +14,7 @@ pub mod connectors;
 pub mod domain;
 pub mod error;
 pub mod index;
+pub mod launch_state;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
@@ -26,6 +27,7 @@ pub mod word_processing;
 pub use config::{Config, ProviderConfig, ProviderRegistry};
 pub use domain::{Message, Role, Session, ToolCallMessage};
 pub use error::AppError;
+pub use launch_state::{LAUNCH_STATE_SCHEMA_VERSION, LaunchState, LaunchStateStore, RecentProject};
 pub use llm::{
     CompletionRequest, CompletionResponse, FunctionCall, FunctionDefinition, LiteLlmProvider,
     LlmMessage, LlmProvider, ModelInfo, OllamaProvider, ToolCall, ToolDefinition, Usage,

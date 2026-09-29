@@ -28,6 +28,7 @@ dependencies = [
  "clap",
  "cron",
  "dialoguer",
+ "dirs",
  "dotenvy",
  "keyring",
  "reqwest 0.12.28",
