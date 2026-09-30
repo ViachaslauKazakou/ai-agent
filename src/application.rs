@@ -1530,7 +1530,8 @@ impl ApplicationService {
         })
     }
 
-    /// Validates and persists settings, then reloads the service configuration.
+    /// Accepts sensitive settings from the trusted local editor, validates and
+    /// persists them, then reloads the service configuration.
     pub fn write_settings(
         &mut self,
         project_id: &str,
@@ -1769,6 +1770,159 @@ mod tests {
         sync::{Arc, Mutex},
     };
     use uuid::Uuid;
+
+    #[test]
+    fn settings_secrets_only_cross_the_explicit_editor_boundary() {
+        let root = std::env::temp_dir().join(format!("desktop-settings-{}", Uuid::new_v4()));
+        let project_dir = root.join("project");
+        fs::create_dir_all(&project_dir).unwrap();
+        let store = LaunchStateStore::new(root.join("user/state.json"));
+        let mut service = ApplicationService::with_launch_state_store(store.clone()).unwrap();
+        let project = match service
+            .execute(
+                Uuid::new_v4(),
+                ApplicationCommand::OpenProject {
+                    path: project_dir.clone(),
+                },
+            )
+            .unwrap()
+            .payload
+        {
+            ApplicationEvent::ProjectOpened(project) => project,
+            _ => panic!("expected opened project"),
+        };
+        let mut documents = service.read_settings(&project.id).unwrap();
+        let provider_secret = "sentinel-provider-key-890abc";
+        let connector_secret = "sentinel-connector-key-123def";
+        let mut providers: serde_json::Value =
+            serde_json::from_str(&documents.providers_json).unwrap();
+        providers["providers"]["litellm"]["api_key"] = json!(provider_secret);
+        let mut config: serde_json::Value = serde_json::from_str(&documents.config_json).unwrap();
+        config["web_search_api_key"] = json!(connector_secret);
+        documents.providers_json = providers.to_string();
+        documents.config_json = config.to_string();
+        service
+            .write_settings(
+                &project.id,
+                &documents.config_json,
+                &documents.providers_json,
+            )
+            .unwrap();
+
+        let loaded = service.read_settings(&project.id).unwrap();
+        assert!(loaded.providers_json.contains(provider_secret));
+        assert!(loaded.config_json.contains(connector_secret));
+        assert!(format!("{:?}", service.configs[&project.id]).contains("Config"));
+        for secret in [provider_secret, connector_secret] {
+            assert!(!format!("{:?}", service.configs[&project.id]).contains(secret));
+            assert!(
+                !service.configs[&project.id]
+                    .to_pretty_json()
+                    .contains(secret)
+            );
+            assert!(
+                !serde_json::to_string(&service.startup_state())
+                    .unwrap()
+                    .contains(secret)
+            );
+            assert!(
+                !fs::read_to_string(root.join("user/state.json"))
+                    .unwrap()
+                    .contains(secret)
+            );
+            for command in [
+                ApplicationCommand::GetStartupState,
+                ApplicationCommand::ListModels,
+                ApplicationCommand::ListProjects,
+            ] {
+                let event = service.execute(Uuid::new_v4(), command).unwrap();
+                assert!(!serde_json::to_string(&event).unwrap().contains(secret));
+            }
+            assert!(
+                !serde_json::to_string(&service.assistant_capabilities(&project.id).unwrap())
+                    .unwrap()
+                    .contains(secret)
+            );
+        }
+        assert!(service.read_settings("unknown-project").is_err());
+        assert!(
+            service
+                .write_settings(
+                    "unknown-project",
+                    &documents.config_json,
+                    &documents.providers_json
+                )
+                .is_err()
+        );
+        assert!(!service.startup_state().recent_projects.is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_settings_values_do_not_appear_in_project_open_errors() {
+        let root = std::env::temp_dir().join(format!("desktop-settings-error-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let mut service = ApplicationService::with_launch_state_store(LaunchStateStore::new(
+            root.join("user/state.json"),
+        ))
+        .unwrap();
+        let project = match service
+            .execute(
+                Uuid::new_v4(),
+                ApplicationCommand::OpenProject { path: root.clone() },
+            )
+            .unwrap()
+            .payload
+        {
+            ApplicationEvent::ProjectOpened(project) => project,
+            _ => panic!("expected opened project"),
+        };
+        let original = service.read_settings(&project.id).unwrap();
+        for field in [
+            "default_provider",
+            "reasoning_effort",
+            "request_timeout_secs",
+        ] {
+            let sentinel = format!("sentinel-secret-in-{field}");
+            let mut config: serde_json::Value =
+                serde_json::from_str(&original.config_json).unwrap();
+            config[field] = json!(sentinel);
+            let error = service
+                .write_settings(&project.id, &config.to_string(), &original.providers_json)
+                .unwrap_err();
+            assert!(!error.to_string().contains(&sentinel), "{field}: {error}");
+            let mut another_service = ApplicationService::with_launch_state_store(
+                LaunchStateStore::new(root.join("user/state.json")),
+            )
+            .unwrap();
+            let error = another_service
+                .execute(
+                    Uuid::new_v4(),
+                    ApplicationCommand::OpenProject { path: root.clone() },
+                )
+                .unwrap_err();
+            assert!(!error.to_string().contains(&sentinel));
+        }
+        for (file, invalid_value) in [
+            (
+                "config.json",
+                r#"{"request_timeout_secs":"sentinel-in-config"}"#,
+            ),
+            (
+                "providers.json",
+                r#"{"providers":{"litellm":{"api_key":["sentinel-in-provider"]}}}"#,
+            ),
+        ] {
+            let error = if file == "config.json" {
+                service.write_settings(&project.id, invalid_value, &original.providers_json)
+            } else {
+                service.write_settings(&project.id, &original.config_json, invalid_value)
+            }
+            .unwrap_err();
+            assert!(!error.to_string().contains("sentinel-in-"));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn assistant_registry_is_read_only_even_when_profile_allows_writes() {

@@ -17,8 +17,9 @@ Tauri IPC or a loopback browser transport.
 ## Contract rules
 
 - Every envelope contains `api_version`, `request_id`, and `sequence`.
-- DTOs never contain API keys, OAuth refresh tokens, raw tool arguments, or
-  unbounded tool results.
+- Ordinary command/event DTOs never contain API keys, OAuth refresh tokens,
+  raw tool arguments, or unbounded tool results. `SettingsDocuments` is an
+  explicitly sensitive exception for the trusted local settings editor.
 - Project and session identifiers are opaque to the transport.
 - The backend remains responsible for path validation, configuration loading,
   tool permissions, confirmation, and secret redaction.
@@ -48,8 +49,21 @@ only be created for registered projects.  This keeps basic validation in the
 shared service instead of duplicating it in a desktop or browser adapter.
 
 Provider metadata is intentionally public but limited to registry names, kinds,
-and model identifiers. API keys, endpoint secrets, and OAuth credentials never
-cross the application boundary.
+and model identifiers. Unlike these metadata commands, the separate
+`read_settings`/`write_settings` Tauri IPC commands exchange raw project-local
+`.aiagent/config.json` and `.aiagent/providers.json` with the local WebView
+editor. Both documents can contain API keys or connector secrets; editing them
+therefore requires trusting the bundled frontend and the selected project.
+OAuth refresh tokens stored in the OS credential store are not part of those
+files. Settings are not returned through the generic application command/event
+envelope, copied into global launch state or logged by the settings UI. Close
+the dialog to clear its textareas; this does not remove the on-disk secrets.
+Never use this editor with untrusted injected frontend content. The settings
+save path validates and replaces each file independently, not as one transaction.
+Known configuration validation and JSON parsing errors omit the original
+invalid value (they report the field/line/column instead), since project-open
+errors can also reach the generic UI or stderr. The editor displays only a
+generic settings failure; inspect project files locally for details.
 
 `open_project` now reuses the existing `Config::load` path. It canonicalizes the
 directory, initializes missing `.aiagent` project files through the existing
@@ -212,8 +226,9 @@ cargo tauri dev
 
 If the Tauri CLI is not installed, use `cargo install tauri-cli --version '^2'`
 or invoke it through the project tooling used by your environment. The
-frontend is loaded from `frontend/`; no API keys are placed in the frontend or
-Tauri configuration. Choose a directory with the native `Choose...` button or
+frontend is loaded from `frontend/`; no API keys are compiled into its assets
+or Tauri configuration, but the settings editor receives raw keys on demand.
+Choose a directory with the native `Choose...` button or
 enter an absolute path, then select `Open project`, create a session, and use
 the prompt field to send a request. The backend rejects missing paths before
 registration.

@@ -291,9 +291,18 @@ The gear button in the top-right opens editors for:
 - `.aiagent/config.json`;
 - `.aiagent/providers.json`.
 
-The backend validates both JSON documents and writes them atomically. The
+The backend validates both JSON documents and writes each file atomically. The
 execution log is available at the bottom of the window. It is collapsed by
 default and can be expanded when diagnosing provider or tool errors.
+
+This is a **trusted local editor exception** to the ordinary secret-free DTO
+contract: the two raw JSON files (including any provider API key and connector
+secret in `config.json`) cross Tauri IPC into the WebView only when settings
+are opened. The textareas clear on closing the dialog. Settings errors are not
+copied to the execution log, but the files remain on disk and settings writes
+are atomic per file, not a two-file transaction. Do not open untrusted projects
+or inject remote scripts into this window. OAuth refresh tokens in the OS
+credential store are not exposed by this editor.
 
 ### Release desktop build
 
@@ -331,6 +340,15 @@ directly; the DMG is under `target/release/bundle/dmg/`.
 Locally built macOS bundles are not Developer ID signed or notarized by
 default. For distribution to another Mac, configure signing and notarization
 before shipping the DMG; Gatekeeper may reject an unsigned downloaded app.
+The Linux CI quality job does not build a signed Desktop installer. The
+automated release workflow currently publishes a Linux **CLI** archive only;
+Desktop packages need separate platform signing and manual distribution checks.
+
+The release version comes from the workspace `Cargo.toml`. The auto-release PR
+updates Cargo.lock, the Tauri bundle version and both npm manifests together;
+`python3 scripts/check_versions.py` rejects any drift before release. Packaged
+frontend assets use a local, external startup-error script and keep the strict
+Tauri CSP (`script-src 'self'`); no inline event handlers or `unsafe-inline`.
 
 Open an existing project directly, or choose one from the launcher:
 
@@ -393,5 +411,8 @@ cargo fmt --all -- --check
 cargo test --workspace
 cargo check --workspace
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cd frontend && npm run check && npm run build
+npm --prefix frontend ci
+npm --prefix frontend run check
+npm --prefix frontend run build
+python3 scripts/check_versions.py
 ```

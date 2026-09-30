@@ -18,19 +18,19 @@ if workspace["package"]["version"] != {"workspace": True}:
     raise SystemExit("CLI package must inherit the workspace version")
 if desktop["package"]["version"] != {"workspace": True}:
     raise SystemExit("Desktop package must inherit the workspace version")
-for name, actual in (
+versions = [
     ("Tauri", tauri["version"]),
     ("frontend", package["version"]),
     ("frontend lockfile", lock["version"]),
     ("frontend lockfile root", lock["packages"][""]["version"]),
-    *(
-        (f"Cargo.lock {name}", next(
-            package["version"] for package in cargo_lock["package"]
-            if package["name"] == name
-        ))
-        for name in ("ai-agent", "via-agent")
-    ),
-):
+]
+for name in ("ai-agent", "via-agent"):
+    locked = [package["version"] for package in cargo_lock["package"] if package["name"] == name]
+    if len(locked) != 1:
+        raise SystemExit(f"expected exactly one Cargo.lock entry for {name}")
+    versions.append((f"Cargo.lock {name}", locked[0]))
+
+for name, actual in versions:
     if actual != version:
         raise SystemExit(f"{name} version {actual} does not match Cargo {version}")
 

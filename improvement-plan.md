@@ -286,17 +286,18 @@ Desktop должен запускаться со стартового экран
 
 ### Этап 10. CI, документация и выпуск
 
-Статус: [ ] не начато.
+Статус: [~] локальная подготовка и проверки выполнены; ожидаются запуск CI
+на GitHub, визуальный smoke test packaged WebView и проверка других ОС.
 
 Задачи:
 
-- [ ] Запускать в CI `cargo fmt`, `cargo check --workspace`, `cargo test --workspace` и Clippy с `-D warnings`.
-- [ ] Запускать frontend tests/check/build.
-- [ ] Синхронизировать версии Cargo, Tauri и frontend package.
-- [ ] Проверить CSP и inline startup-error script в packaged build.
-- [ ] Проверить, что settings API не нарушает заявленную границу секретов.
-- [ ] Обновить `README.md`, `RUNNING.md` и профильные документы.
-- [ ] Выполнить packaged Desktop smoke test на поддерживаемых ОС.
+- [~] Настроить в CI `cargo fmt`, `cargo check --workspace`, `cargo test --workspace` и Clippy с `-D warnings`: локальный gate пройден, GitHub job не запускался на этих изменениях.
+- [~] Настроить frontend tests/check/build в CI: локально проверено, GitHub job ожидается.
+- [x] Синхронизировать версии Cargo, Cargo.lock, Tauri и frontend package/lock; добавить проверку версий и обновление lockfiles в release workflow.
+- [~] Проверить CSP и startup-error script в packaged build: inline обработчики удалены, production HTML и отдельный ресурс проверены тестом, bundle собран с жёстким CSP; исполнение в packaged WebView пока не подтверждено визуально.
+- [x] Проверить границу секретов settings API: чувствительные JSON доступны только доверенному локальному editor через отдельный IPC; обычные DTO и startup state проверены тестами, известные validation errors не отражают исходное значение.
+- [x] Обновить `README.md`, `RUNNING.md` и `docs/desktop-application-api.md` с ограничениями безопасности и выпуска.
+- [~] Packaged Desktop smoke: macOS arm64 `.app` и DMG собраны, DMG checksum проверен; GUI не подтверждён визуально, Linux/Windows и signing/notarization не проверены.
 
 ## 6. Порядок проверки и коммитов
 

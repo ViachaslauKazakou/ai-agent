@@ -106,9 +106,12 @@ cargo install tauri-cli --version '^2'
 ```
 
 Для production package после настройки platform signing используйте
-`cargo tauri build --manifest-path src-tauri/Cargo.toml`. API keys и OAuth
-tokens не находятся во frontend или Tauri config; их обработка остаётся в
-Rust backend и OS credential storage.
+`cargo tauri build --manifest-path src-tauri/Cargo.toml`. Ключи не встраиваются
+в frontend assets или Tauri config, но локальный редактор настроек получает
+сырой `.aiagent/config.json` и `.aiagent/providers.json` (включая возможные
+секреты) через IPC; доверяйте выбранному проекту и приложению. OAuth refresh
+tokens хранятся в OS credential storage. Подробнее —
+[контракт Desktop API](docs/desktop-application-api.md).
 
 Для release-сборки всего проекта:
 
@@ -117,7 +120,7 @@ make release-all
 ```
 
 Команда собирает консольный бинарник `target/release/ai-agent` и desktop
-приложение `via-agent` в `src-tauri/target/release/bundle/`. Для установки
+приложение `via-agent` в `target/release/bundle/`. Для установки
 команды desktop в `~/.cargo/bin`:
 
 ```bash
@@ -931,13 +934,17 @@ Skills являются инструкциями для system prompt: они н
 
 ## Проверки
 
-Из каталога `ai-agent`:
+Из каталога `ai-agent` (те же проверки запускает Linux CI для всего workspace):
 
 ```bash
-cargo fmt -- --check
-cargo check
-cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check
+cargo check --workspace --locked
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+npm --prefix frontend ci
+npm --prefix frontend run check
+npm --prefix frontend run build
+python3 scripts/check_versions.py
 ```
 
 Или из корня репозитория:
@@ -952,10 +959,10 @@ make clippy
 Полная последовательность:
 
 ```bash
-cargo fmt -- --check \
-  && cargo check \
-  && cargo test \
-  && cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check \
+  && cargo check --workspace --locked \
+  && cargo test --workspace --locked \
+  && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
 ## Текущие ограничения

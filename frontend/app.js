@@ -55,6 +55,10 @@ const providersEditor = document.querySelector("#providers-json");
 const settingsStatus = document.querySelector("#settings-status");
 const reloadSettingsButton = document.querySelector("#reload-settings");
 const saveSettingsButton = document.querySelector("#save-settings");
+settingsDialog.addEventListener("close", () => {
+  configEditor.value = "";
+  providersEditor.value = "";
+});
 let activeProject;
 let activeSession;
 let usedToolNames = new Set();
@@ -345,14 +349,19 @@ async function loadSettings() {
     return;
   }
   settingsStatus.textContent = "Loading…";
+  const projectId = activeProject.id;
   try {
-    const documents = await invoke("read_settings", { projectId: activeProject.id });
+    const documents = await invoke("read_settings", { projectId });
+    if (!settingsDialog.open || activeProject?.id !== projectId) return;
     configEditor.value = documents.config_json;
     providersEditor.value = documents.providers_json;
     settingsStatus.textContent = "Loaded";
-  } catch (error) {
+  } catch {
+    if (!settingsDialog.open || activeProject?.id !== projectId) return;
     settingsStatus.textContent = "Load failed";
-    showError(error);
+    // Keep settings errors out of the generic execution log: project files
+    // contain credentials, even though known validation errors are sanitized.
+    status.textContent = "Settings load failed; inspect the project files locally";
   }
 }
 
@@ -383,7 +392,7 @@ saveSettingsButton.addEventListener("click", async () => {
     await assistant.refresh();
   } catch (error) {
     settingsStatus.textContent = "Save failed";
-    showError(error);
+    status.textContent = "Settings save failed; check the project JSON locally";
   } finally {
     saveSettingsButton.disabled = false;
   }

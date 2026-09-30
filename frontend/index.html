@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <title>AI Agent</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script src="/startup-error.js"></script>
   </head>
   <body>
     <main class="shell">
@@ -165,7 +166,7 @@
           </div>
           <button class="icon-button" value="cancel" type="submit" title="Close">×</button>
         </div>
-        <p class="settings-help">Edit the project configuration and provider registry. Changes are validated and saved atomically.</p>
+        <p class="settings-help">These raw project files may contain API keys and connector secrets. They are visible to this local WebView editor; only open trusted projects. Changes are validated and saved locally.</p>
         <label class="field-label" for="config-json">.aiagent/config.json</label>
         <textarea id="config-json" class="config-editor" spellcheck="false"></textarea>
         <label class="field-label" for="providers-json">.aiagent/providers.json</label>
@@ -186,7 +187,6 @@
         <div class="settings-actions"><button id="assistant-prompt-delete" class="toolbar-button" type="button">Delete selected</button><span id="assistant-prompt-status" class="settings-status" role="status"></span><button id="assistant-prompt-save" class="primary-button" type="button">Save preset</button></div>
       </form>
     </dialog>
-    <script src="./startup-error.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

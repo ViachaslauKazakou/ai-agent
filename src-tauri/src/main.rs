@@ -2,7 +2,8 @@
 //!
 //! The adapter intentionally contains no agent-loop or permission logic.  It
 //! only translates IPC requests into `ai_agent::application` commands and
-//! serializes the resulting safe DTO envelope for the frontend.
+//! serializes the resulting DTO envelope for the frontend. Settings commands
+//! are a separate sensitive local-editor exception to the ordinary DTO contract.
 
 use ai_agent::application::{
     ApplicationCommand, ApplicationEnvelope, ApplicationEvent, ApplicationService,
@@ -138,7 +139,7 @@ async fn send_message(
     result
 }
 
-/// Loads the two project-local JSON documents for the settings dialog.
+/// Loads sensitive project JSON for the trusted local settings dialog only.
 #[tauri::command]
 async fn read_settings(
     state: State<'_, DesktopState>,
@@ -150,7 +151,7 @@ async fn read_settings(
         .map_err(|error| error.to_string())
 }
 
-/// Validates and atomically saves edited project settings.
+/// Validates and saves edited project settings from the trusted local WebView.
 ///
 /// Validation happens in the shared configuration module before any runtime
 /// state is reloaded, so malformed JSON cannot replace the active files.

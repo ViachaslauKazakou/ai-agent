@@ -208,8 +208,13 @@ impl Config {
 
     /// Validates and atomically writes a project JSON document.
     pub fn write_project_config_json(project_dir: &Path, content: &str) -> Result<(), AppError> {
-        let config: JsonConfig = serde_json::from_str(content)
-            .map_err(|error| AppError::AgentConfig(format!("config.json: {error}")))?;
+        let config: JsonConfig = serde_json::from_str(content).map_err(|error| {
+            AppError::AgentConfig(format!(
+                "config.json: invalid JSON or field type at line {} column {}",
+                error.line(),
+                error.column()
+            ))
+        })?;
         let data = serde_json::to_vec_pretty(&config)
             .map_err(|error| AppError::AgentConfig(error.to_string()))?;
         atomic_write(&project_dir.join(PROJECT_CONFIG_PATH), &data)
@@ -223,8 +228,13 @@ impl Config {
 
     /// Validates and atomically writes the provider registry document.
     pub fn write_provider_config_json(project_dir: &Path, content: &str) -> Result<(), AppError> {
-        let providers: ProviderRegistry = serde_json::from_str(content)
-            .map_err(|error| AppError::AgentConfig(format!("providers.json: {error}")))?;
+        let providers: ProviderRegistry = serde_json::from_str(content).map_err(|error| {
+            AppError::AgentConfig(format!(
+                "providers.json: invalid JSON or field type at line {} column {}",
+                error.line(),
+                error.column()
+            ))
+        })?;
         let data = serde_json::to_vec_pretty(&providers)
             .map_err(|error| AppError::AgentConfig(error.to_string()))?;
         atomic_write(&project_dir.join(PROVIDERS_CONFIG_PATH), &data)
@@ -362,7 +372,15 @@ impl Config {
         if cli.working_dir.is_none() && !environment.contains_key("WORKING_DIR") {
             cli.working_dir = Some(project_dir.clone());
         }
-        let mut result = Self::from_sources_with_file(&cli, &environment, file, providers)?;
+        // Project JSON and environment variables can hold credentials. Keep
+        // validation errors from echoing their original values to callers.
+        let mut result = Self::from_sources_with_file(&cli, &environment, file, providers)
+            .map_err(|error| match error {
+                AppError::InvalidEnvironmentValue { name, .. } => {
+                    AppError::InvalidConfig(format!("некорректное значение параметра {name}"))
+                }
+                other => other,
+            })?;
         result.project_dir = project_dir;
         Ok(result)
     }
@@ -446,7 +464,7 @@ impl Config {
             );
         }
         let provider_config = providers.provider(&provider).ok_or_else(|| {
-            AppError::InvalidConfig(format!("провайдер не найден в providers.json: {provider}"))
+            AppError::InvalidConfig("провайдер не найден в providers.json".to_owned())
         })?;
         let base_url = cli
             .base_url
@@ -851,17 +869,22 @@ pub fn normalize_reasoning_effort(value: &str) -> Result<String, AppError> {
     let normalized = value.trim().to_ascii_lowercase();
     match normalized.as_str() {
         "none" | "low" | "medium" | "high" => Ok(normalized),
-        _ => Err(AppError::InvalidConfig(format!(
-            "недопустимый reasoning_effort: {value}; используйте none, low, medium или high"
-        ))),
+        _ => Err(AppError::InvalidConfig(
+            "недопустимый reasoning_effort; используйте none, low, medium или high".to_owned(),
+        )),
     }
 }
 
 fn load_json_config(path: &Path) -> Result<Option<JsonConfig>, AppError> {
     match fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str(&content)
-            .map(Some)
-            .map_err(|error| AppError::AgentConfig(format!("{}: {error}", path.display()))),
+        Ok(content) => serde_json::from_str(&content).map(Some).map_err(|error| {
+            AppError::AgentConfig(format!(
+                "{}: invalid JSON or field type at line {} column {}",
+                path.display(),
+                error.line(),
+                error.column()
+            ))
+        }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(AppError::AgentConfig(format!(
             "{}: {error}",
@@ -872,8 +895,14 @@ fn load_json_config(path: &Path) -> Result<Option<JsonConfig>, AppError> {
 
 fn load_provider_registry(path: &Path) -> Result<ProviderRegistry, AppError> {
     match fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str(&content)
-            .map_err(|error| AppError::AgentConfig(format!("{}: {error}", path.display()))),
+        Ok(content) => serde_json::from_str(&content).map_err(|error| {
+            AppError::AgentConfig(format!(
+                "{}: invalid JSON or field type at line {} column {}",
+                path.display(),
+                error.line(),
+                error.column()
+            ))
+        }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(ProviderRegistry::default())
         }
