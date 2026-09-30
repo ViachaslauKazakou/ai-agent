@@ -542,6 +542,7 @@ impl Config {
                 "read_file".to_owned(),
                 "list_directory".to_owned(),
                 "write_file".to_owned(),
+                "create_file".to_owned(),
                 "apply_patch".to_owned(),
                 "rollback_last_change".to_owned(),
                 "search_files".to_owned(),

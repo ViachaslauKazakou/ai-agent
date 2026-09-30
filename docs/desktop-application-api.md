@@ -106,6 +106,19 @@ continue calling tools until it produces a final response. The configured
 `max_loop_seconds` (600 seconds by default), tool permissions, and per-tool
 limits still apply. The CLI retains its configured `max_tool_rounds` behavior.
 
+For the Desktop Chat-bot only, the service grants file writes by default when
+canonical `working_dir == project_dir` and `confirm_writes` is false. This is
+independent of CLI `--allow-write` and does not alter CLI permissions. The
+default tool list includes create/write/patch; explicitly configured
+`enabled_tools` is still respected. Patch application uses a Desktop-only
+non-interactive approval policy (no terminal stdin), with preview and Git
+checkpoint preserved. If `confirm_writes` is true, or a separate tool directory
+is configured, file writes fail closed until a UI confirmation or separately
+scoped permission flow is implemented. Writes cannot escape the canonical
+project through traversal or symlinks; protected `.git/`, `.aiagent/`, secret
+files and secret content remain forbidden. Git operations that require explicit
+interactive confirmation are unchanged; shell commands remain allowlisted.
+
 Legacy `<project>/.aiagent/session.json` is copied into the index before a new
 session is created or that history is restored; the legacy file remains for the
 CLI. Incompatible or damaged legacy files block creation until repaired to

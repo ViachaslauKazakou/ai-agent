@@ -293,6 +293,18 @@ fn desktop_provider(config: &Config, name: &str) -> Result<DesktopProvider, AppE
     }
 }
 
+/// Desktop grants project-local file edits without the CLI's --allow-write flag.
+/// A separate tool directory or a requested interactive confirmation cannot
+/// safely inherit that grant from a non-interactive client.
+fn desktop_tool_context(config: &Config, activity: Arc<Mutex<Option<String>>>) -> ToolContext {
+    let allow_write = config.working_dir == config.project_dir && !config.confirm_writes;
+    let mut context = ToolContext::new(&config.working_dir, allow_write);
+    context.confirm_writes = config.confirm_writes;
+    context.auto_approve_patch = allow_write;
+    context.status = activity;
+    context
+}
+
 /// Runtime state required to execute a session without exposing internals to
 /// the transport or frontend layers.
 struct DesktopAgent {
@@ -1028,10 +1040,8 @@ impl ApplicationService {
             .profile("default")
             .ok_or_else(|| AppError::AgentConfig("default agent profile is missing".to_owned()))?;
         let registry = registry_from_names(&profile.enabled_tools)?;
-        let mut context = ToolContext::new(&config.working_dir, config.allow_write);
-        context.confirm_writes = config.confirm_writes;
+        let mut context = desktop_tool_context(&config, activity);
         context.command_allowlist = profile.command_allowlist.clone();
-        context.interactive = false;
         context.graph_client_id = config.microsoft_graph_client_id.clone();
         context.graph_tenant = config.microsoft_graph_tenant.clone();
         context.graph_scope = config.microsoft_graph_scope.clone();
@@ -1042,7 +1052,6 @@ impl ApplicationService {
         context.web_search_provider = config.web_search_provider.clone();
         context.web_search_endpoint = config.web_search_endpoint.clone();
         context.web_search_api_key = config.web_search_api_key.clone();
-        context.status = activity;
         let provider = desktop_provider(&config, &session.provider)?;
         let agent = crate::agent::Agent::new(provider, registry, context, profile.max_tool_rounds)
             .without_tool_round_limit()
@@ -1373,10 +1382,119 @@ fn public_providers(registry: &ProviderRegistry) -> Vec<ProviderDto> {
 mod tests {
     use super::{
         APPLICATION_API_VERSION, ApplicationCommand, ApplicationEvent, ApplicationService,
+        desktop_tool_context,
     };
-    use crate::{LaunchStateStore, Message, Role, Session};
-    use std::{fs, path::PathBuf};
+    use crate::{LaunchStateStore, Message, Role, Session, tools::registry_from_names};
+    use serde_json::json;
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn desktop_default_can_edit_only_the_selected_project() {
+        let root = std::env::temp_dir().join(format!("desktop-write-{}", Uuid::new_v4()));
+        let first = root.join("first");
+        let second = root.join("second");
+        fs::create_dir_all(first.join(".git")).unwrap();
+        fs::create_dir_all(second.join(".git")).unwrap();
+        let mut service = ApplicationService::new();
+        let project = match service
+            .execute(
+                Uuid::new_v4(),
+                ApplicationCommand::OpenProject {
+                    path: first.clone(),
+                },
+            )
+            .unwrap()
+            .payload
+        {
+            ApplicationEvent::ProjectOpened(project) => project,
+            _ => panic!("expected project"),
+        };
+        let config = &service.configs[&project.id];
+        assert!(!config.allow_write);
+        let context = desktop_tool_context(config, Arc::new(Mutex::new(None)));
+        assert!(context.allow_write);
+        let catalog = crate::agents::AgentCatalog::load(&config.working_dir, config).unwrap();
+        let registry =
+            registry_from_names(&catalog.profile("default").unwrap().enabled_tools).unwrap();
+        assert!(registry.names().contains(&"create_file".to_owned()));
+        registry
+            .execute(
+                "create_file",
+                json!({"path":"nested/main.rs","content":"old"}),
+                &context,
+            )
+            .await
+            .unwrap();
+        registry
+            .execute(
+                "apply_patch",
+                json!({"path":"nested/main.rs","old_text":"old","new_text":"new","apply":true}),
+                &context,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(first.join("nested/main.rs")).unwrap(),
+            "new"
+        );
+        assert!(
+            registry
+                .execute(
+                    "write_file",
+                    json!({"path": second.join("file.rs").display().to_string(),"content":"bad"}),
+                    &context
+                )
+                .await
+                .is_err()
+        );
+        assert!(!second.join("file.rs").exists());
+
+        service
+            .open_project_with_working_dir(Uuid::new_v4(), first.clone(), Some(second.clone()))
+            .unwrap();
+        let external_config = &service.configs[&project.id];
+        let external_context = desktop_tool_context(external_config, Arc::new(Mutex::new(None)));
+        assert!(!external_context.allow_write);
+        assert!(
+            registry
+                .execute(
+                    "create_file",
+                    json!({"path":"blocked.rs","content":"bad"}),
+                    &external_context
+                )
+                .await
+                .is_err()
+        );
+        assert!(!second.join("blocked.rs").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn desktop_confirmation_setting_disables_unconfirmed_writes() {
+        let root = std::env::temp_dir().join(format!("desktop-confirm-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let mut service = ApplicationService::new();
+        let project = match service
+            .execute(
+                Uuid::new_v4(),
+                ApplicationCommand::OpenProject { path: root.clone() },
+            )
+            .unwrap()
+            .payload
+        {
+            ApplicationEvent::ProjectOpened(project) => project,
+            _ => panic!("expected project"),
+        };
+        let mut config = service.configs[&project.id].clone();
+        config.confirm_writes = true;
+        assert!(!desktop_tool_context(&config, Arc::new(Mutex::new(None))).allow_write);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn command_serialization_is_stable_and_versioned() {

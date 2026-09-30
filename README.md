@@ -14,7 +14,8 @@
   `read_lines`, `project_search`, read-only email tools
   `list_recent_emails`, `get_email`, `search_emails` и опциональный `run_command`;
 - ограничение tools списком `enabled_tools`;
-- запись файлов выключена без явного `allow_write = true`;
+- CLI: запись файлов выключена без явного `allow_write = true` или `--allow-write`;
+- Desktop Chat-bot: запись и patch файлов выбранного проекта разрешены по умолчанию (кроме защищённых путей и секретов); при отдельном `working_dir` или `confirm_writes = true` запись блокируется;
 - diff-based редактирование через `apply_patch` с preview и подтверждением;
 - checkpoint перед записью и `rollback_last_change` для отката;
 - запрет `.env`, credential/secret-файлов и секретов в содержимом;
@@ -840,9 +841,11 @@ max_loop_seconds = 600
 max_diff_bytes = 100000
 ```
 
-`allow_write = true` разрешает `write_file`, но tool всё равно должен быть в
+`allow_write = true` разрешает `write_file` в CLI, но tool всё равно должен быть в
 `enabled_tools`. При `confirm_writes = true` интерактивный REPL запрашивает
-подтверждение перед записью.
+подтверждение перед записью. Desktop Chat-bot отдельно разрешает project-local
+write tools по умолчанию; явное требование подтверждения блокирует запись до
+появления UI-подтверждений. Подробнее: [RUNNING.md](RUNNING.md#desktop-client).
 
 ### Профили агентов и skills
 

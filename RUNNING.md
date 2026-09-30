@@ -199,9 +199,19 @@ The Tauri window opens the launcher through the local Vite server. In the UI:
     incompatible history is kept intact and reported; repair it before creating
     new sessions.
 5. Enter a prompt and click `Send`. Desktop does not stop at 20 tool rounds;
-   it continues until the agent finishes or the configured `max_loop_seconds`
-   timeout is reached (600 seconds by default). CLI requests still honor
-   `max_tool_rounds`.
+    it continues until the agent finishes or the configured `max_loop_seconds`
+    timeout is reached (600 seconds by default). CLI requests still honor
+    `max_tool_rounds`.
+    Chat-bot can create and edit files in the selected project by default,
+    without CLI `--allow-write`. Only tools in `enabled_tools` are available;
+    the default set includes `write_file`, `create_file`, and `apply_patch`.
+    Desktop applies patches without terminal confirmation, but does not enable
+    Git commit/push or shell commands. Files outside the project (including via
+    symlinks), secrets, `.git/`, and `.aiagent/` remain protected. File edits
+    require a Git repository for checkpoints. If `working_dir` points to a
+    different directory or `confirm_writes` is enabled, Desktop refuses file
+    mutations rather than silently writing elsewhere or skipping a requested
+    confirmation. The CLI retains its read-only default and interactive prompts.
 6. Use `Switch project` to return to the launcher. The active project and
    session selection are cleared, while persisted recent projects remain.
 
