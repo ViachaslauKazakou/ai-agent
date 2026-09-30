@@ -40,6 +40,7 @@ const modelInput = document.querySelector("#model");
 const createSessionButton = document.querySelector("#create-session");
 const savedSessions = document.querySelector("#saved-sessions");
 const restoreSavedButton = document.querySelector("#restore-saved-session");
+const deleteSavedButton = document.querySelector("#delete-saved-session");
 const session = document.querySelector("#session");
 const messages = document.querySelector("#messages");
 const trace = document.querySelector("#trace");
@@ -47,10 +48,8 @@ const promptInput = document.querySelector("#prompt");
 const composer = document.querySelector("#composer");
 const sendButton = document.querySelector("#send");
 const thinking = document.querySelector("#thinking");
-const attachments = document.querySelector("#attachments");
 const usedTools = document.querySelector("#used-tools");
 const quoteButton = document.querySelector("#quote");
-const attachButton = document.querySelector("#attach");
 const toolEvents = document.querySelector("#tool-events");
 const settingsButton = document.querySelector("#settings");
 const switchProjectButton = document.querySelector("#switch-project");
@@ -62,7 +61,6 @@ const reloadSettingsButton = document.querySelector("#reload-settings");
 const saveSettingsButton = document.querySelector("#save-settings");
 let activeProject;
 let activeSession;
-let attachedFiles = [];
 let usedToolNames = new Set();
 let activityTimer;
 let availableProviders = [];
@@ -77,7 +75,7 @@ function renderSavedSessions() {
   for (const item of projectSessions) {
     const option = document.createElement("option");
     option.value = item.id;
-    option.textContent = `${item.provider} / ${item.model} · ${item.id.slice(0, 8)} (${item.message_count} messages)`;
+    option.textContent = `${item.title || "New conversation"} · ${item.provider} / ${item.model} · ${item.updated_at ? formatOpenedAt(item.updated_at) : "legacy"} (${item.message_count})`;
     savedSessions.append(option);
   }
   if (projectSessions.some((item) => item.id === selected)) savedSessions.value = selected;
@@ -89,6 +87,7 @@ function renderSavedSessions() {
   }
   savedSessions.disabled = busy || !projectSessions.length;
   restoreSavedButton.disabled = busy || !projectSessions.length;
+  deleteSavedButton.disabled = busy || !projectSessions.some((item) => item.id === savedSessions.value && item.created_at);
 }
 
 async function refreshSessions() {
@@ -299,17 +298,6 @@ function resetConversation() {
 function setThinking(value) {
   thinking.hidden = !value;
   if (value) status.textContent = "Agent is thinking…";
-}
-
-function renderComposerAttachments() {
-  attachments.replaceChildren();
-  attachments.hidden = attachedFiles.length === 0;
-  for (const file of attachedFiles) {
-    const chip = document.createElement("span");
-    chip.className = "attachment-chip";
-    chip.textContent = file.name;
-    attachments.append(chip);
-  }
 }
 
 function renderUsedTools() {
@@ -553,6 +541,7 @@ createSessionButton.addEventListener("click", async () => {
     activateSession(created);
     await refreshSessions();
     savedSessions.value = created.id;
+    renderSavedSessions();
     const startupEnvelope = await execute({ type: "get_startup_state" });
     appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
     renderRecentProjects();
@@ -574,6 +563,7 @@ restoreSavedButton.addEventListener("click", async () => {
   try {
     const envelope = await execute({ type: "restore_session", payload: { project_id: activeProject.id, session_id: selectedId } });
     activateSession(eventPayload(envelope, "session_restored"), true);
+    renderSavedSessions();
     const startupEnvelope = await execute({ type: "get_startup_state" });
     appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
     renderRecentProjects();
@@ -586,12 +576,42 @@ restoreSavedButton.addEventListener("click", async () => {
   }
 });
 
+savedSessions.addEventListener("change", renderSavedSessions);
+
+deleteSavedButton.addEventListener("click", async () => {
+  if (!activeProject || !savedSessions.value || busy || deleteSavedButton.disabled) return;
+  const selectedId = savedSessions.value;
+  const selected = projectSessions.find((item) => item.id === selectedId);
+  if (!window.confirm(`Delete session “${selected?.title || selectedId.slice(0, 8)}”? Its desktop history cannot be recovered.`)) return;
+  busy = true;
+  renderSavedSessions();
+  try {
+    await execute({ type: "delete_session", payload: { project_id: activeProject.id, session_id: selectedId } });
+    if (activeSession?.id === selectedId) {
+      activeSession = undefined;
+      session.textContent = "Not created";
+      promptInput.disabled = true;
+      sendButton.disabled = true;
+      resetConversation();
+    }
+    await refreshSessions();
+    const startupEnvelope = await execute({ type: "get_startup_state" });
+    appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
+    renderRecentProjects();
+    status.textContent = "Session deleted";
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy = false;
+    renderSavedSessions();
+  }
+});
+
 switchProjectButton.addEventListener("click", async () => {
   appState = returnToLauncher(appState);
   activeProject = undefined;
   activeSession = undefined;
   pendingRestoredSession = undefined;
-  attachedFiles = [];
   usedToolNames.clear();
   availableProviders = [];
   projectSessions = [];
@@ -600,7 +620,6 @@ switchProjectButton.addEventListener("click", async () => {
   promptInput.disabled = true;
   sendButton.disabled = true;
   session.textContent = "Not created";
-  renderComposerAttachments();
   renderUsedTools();
   resetConversation();
   renderRoute();
@@ -697,18 +716,6 @@ quoteButton.addEventListener("click", () => {
   promptInput.value += `${promptInput.value ? "\n\n" : ""}> ${selection.split("\n").join("\n> ")}\n`;
   promptInput.dispatchEvent(new Event("input"));
   promptInput.focus();
-});
-
-attachButton.addEventListener("click", async () => {
-  try {
-    const selected = await open({ multiple: true, directory: false, title: "Attach files" });
-    if (Array.isArray(selected)) attachedFiles = selected.map((path) => ({ name: path.split(/[\\/]/).pop(), path }));
-    else if (typeof selected === "string") attachedFiles = [{ name: selected.split(/[\\/]/).pop(), path: selected }];
-    renderComposerAttachments();
-    logStep("files attached", `${attachedFiles.length} file(s)`);
-  } catch (error) {
-    showError(error);
-  }
 });
 
 document.querySelector("#refresh").addEventListener("click", loadCapabilities);

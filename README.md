@@ -9,7 +9,7 @@
 
 - LiteLLM и Ollama через `/chat/completions`;
 - одноразовый prompt и интерактивный REPL;
-- сохранение истории в `<working-dir>/.aiagent/session.json`;
+- сохранение CLI-истории в `<working-dir>/.aiagent/session.json`; Desktop хранит до десяти отдельных историй в `<project-dir>/.aiagent/sessions/`;
 - tools `read_file`, `list_directory`, `write_file`, `search_files`,
   `read_lines`, `project_search`, read-only email tools
   `list_recent_emails`, `get_email`, `search_emails` и опциональный `run_command`;

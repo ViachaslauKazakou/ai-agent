@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AppError, Session};
+use crate::{AppError, Role, Session};
 
 pub const MAX_PROJECT_SESSIONS: usize = 10;
 const SCHEMA_VERSION: u16 = 1;
@@ -23,6 +23,12 @@ pub struct StoredSession {
     pub model: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Canonical owner; absent only in indexes created before stage 6.
+    #[serde(default)]
+    pub project_path: Option<PathBuf>,
+    /// Short excerpt of the first user prompt, stored only inside the project.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -47,12 +53,16 @@ impl Default for SessionIndex {
 /// Manages histories for one canonical project root.
 pub struct ProjectSessionStore {
     root: PathBuf,
+    project_dir: PathBuf,
 }
 
 impl ProjectSessionStore {
     pub fn new(project_dir: &Path) -> Self {
         Self {
             root: project_dir.join(".aiagent/sessions"),
+            project_dir: project_dir
+                .canonicalize()
+                .unwrap_or_else(|_| project_dir.to_path_buf()),
         }
     }
 
@@ -80,6 +90,18 @@ impl ProjectSessionStore {
         if index.sessions.iter().any(|entry| !ids.insert(entry.id)) {
             return Err(AppError::SessionPersistence(
                 "duplicate session ID in index".into(),
+            ));
+        }
+        if index.sessions.iter().any(|entry| {
+            entry
+                .project_path
+                .as_ref()
+                .is_some_and(|path| path != &self.project_dir)
+                || entry.created_at > entry.updated_at
+                || entry.title.as_ref().is_some_and(|title| title.len() > 160)
+        }) {
+            return Err(failure(
+                "invalid session index metadata or project identity",
             ));
         }
         Ok(index)
@@ -141,6 +163,8 @@ impl ProjectSessionStore {
             model: history.model().into(),
             created_at: now,
             updated_at: now,
+            project_path: Some(self.project_dir.clone()),
+            title: session_title(&history),
         });
         index.migrated_legacy_id = Some(history.id());
         self.save(&index)
@@ -178,6 +202,8 @@ impl ProjectSessionStore {
             model: history.model().into(),
             created_at: now,
             updated_at: now,
+            project_path: Some(self.project_dir.clone()),
+            title: session_title(history),
         });
         let result = history.save_to(&path).and_then(|_| self.save(&index));
         if result.is_err() {
@@ -203,10 +229,60 @@ impl ProjectSessionStore {
                 "session file ID differs from index".into(),
             ));
         }
+        if existing.working_dir() != history.working_dir() {
+            return Err(failure("session working directory changed"));
+        }
         entry.updated_at = Utc::now();
+        entry.project_path = Some(self.project_dir.clone());
+        entry.title = session_title(history);
         history.save_to(self.history_path(history.id()))?;
         self.save(&index)
     }
+
+    /// Removes an indexed history from discovery before deleting its file.
+    /// An interrupted file cleanup leaves only an unindexed orphan.
+    pub fn delete(&self, id: Uuid) -> Result<(), AppError> {
+        let mut index = self.load()?;
+        let position = index
+            .sessions
+            .iter()
+            .position(|entry| entry.id == id)
+            .ok_or_else(|| failure("session is not indexed or has already been deleted"))?;
+        let entry = &index.sessions[position];
+        let path = self.history_path(id);
+        let history = Session::load_from(&path)?;
+        if history.id() != id || history.model() != entry.model {
+            return Err(failure("session index differs from history"));
+        }
+        index.sessions.remove(position);
+        self.save(&index)?;
+        // The index is authoritative; do not roll it back if cleanup fails.
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(failure(format!(
+                "session removed from index; orphan cleanup failed: {error}"
+            ))),
+        }
+    }
+}
+
+fn session_title(history: &Session) -> Option<String> {
+    history
+        .messages()
+        .iter()
+        .find(|message| message.role() == Role::User)
+        .map(|message| {
+            message
+                .content()
+                .split_whitespace()
+                .flat_map(|part| part.chars().chain(std::iter::once(' ')))
+                .take(80)
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .filter(|text| !text.is_empty())
 }
 
 fn failure(error: impl std::fmt::Display) -> AppError {
@@ -344,5 +420,64 @@ mod tests {
         );
         assert!(store.load().unwrap().sessions.is_empty());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn old_index_loads_and_checkpoint_adds_bounded_title_and_owner() {
+        let root = sandbox();
+        let store = ProjectSessionStore::new(&root);
+        let mut history = Session::new(&root, "model").unwrap();
+        store.create(&history, "litellm").unwrap();
+        let path = store.index_path();
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        json["sessions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("project_path");
+        json["sessions"][0].as_object_mut().unwrap().remove("title");
+        fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+        assert!(store.load().unwrap().sessions[0].project_path.is_none());
+        history.add_message(crate::Message::new(crate::Role::Tool, "secret tool result").unwrap());
+        history
+            .add_message(crate::Message::new(crate::Role::User, "  first   question  ").unwrap());
+        store.checkpoint(&history).unwrap();
+        let entry = &store.load().unwrap().sessions[0];
+        assert_eq!(entry.title.as_deref(), Some("first question"));
+        assert_eq!(
+            entry.project_path.as_deref(),
+            Some(root.canonicalize().unwrap().as_path())
+        );
+        assert!(
+            !fs::read_to_string(path)
+                .unwrap()
+                .contains("secret tool result")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deletion_is_scoped_and_corrupt_history_cannot_be_deleted() {
+        let root = sandbox();
+        let other = sandbox();
+        let store = ProjectSessionStore::new(&root);
+        let foreign = ProjectSessionStore::new(&other);
+        let first = Session::new(&root, "model").unwrap();
+        let second = Session::new(&root, "model").unwrap();
+        store.create(&first, "litellm").unwrap();
+        store.create(&second, "litellm").unwrap();
+        assert!(foreign.delete(first.id()).is_err());
+        fs::write(store.history_path(first.id()), "{broken").unwrap();
+        assert!(store.delete(first.id()).is_err());
+        assert_eq!(store.load().unwrap().sessions.len(), 2);
+        store.delete(second.id()).unwrap();
+        assert!(!store.history_path(second.id()).exists());
+        assert!(store.delete(second.id()).is_err());
+        assert_eq!(
+            fs::read_to_string(store.history_path(first.id())).unwrap(),
+            "{broken"
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(other).unwrap();
     }
 }

@@ -26,8 +26,15 @@ opening the project, and displays the number of stored messages without
 exposing message bodies. Incompatible history is reported as a recoverable
 launcher error. `list_sessions` returns the project's ten most recently updated
 histories for explicit switching; creating an eleventh removes the oldest.
-Legacy history is copied into project-local multi-session storage without
+ Legacy history is copied into project-local multi-session storage without
 deleting the original CLI file.
+
+Session selection lists a bounded first-user-message title and timestamps
+from the project-local index; the global state stores neither titles nor
+messages. The Delete button requires confirmation. Deleting an indexed
+session clears its runtime and startup selection; deleting a migrated legacy
+session does not touch the original CLI file. A missing, corrupt, foreign or
+incompatible history is reported for repair, not silently overwritten.
 
 At desktop startup `--working-dir /existing/project` is canonicalized and
 passed to the frontend as a direct-open project path. An invalid argument

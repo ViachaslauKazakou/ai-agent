@@ -33,7 +33,7 @@ use crate::{
 /// The version is part of every envelope so a future desktop application can
 /// reject an incompatible backend instead of silently misinterpreting a
 /// command or event.
-pub const APPLICATION_API_VERSION: u16 = 3;
+pub const APPLICATION_API_VERSION: u16 = 4;
 
 /// Small, secret-free description of a project opened by the client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +84,12 @@ pub struct SessionDto {
     pub model: String,
     /// Number of messages currently retained by the session.
     pub message_count: usize,
+    /// Project-local creation timestamp (legacy histories have no original timestamp).
+    pub created_at: Option<chrono::DateTime<Utc>>,
+    /// Most recent persisted checkpoint timestamp.
+    pub updated_at: Option<chrono::DateTime<Utc>>,
+    /// Bounded excerpt of the first user message, never stored in global state.
+    pub title: Option<String>,
 }
 
 /// Capabilities that a frontend may use to conditionally render controls.
@@ -130,6 +136,11 @@ pub enum ApplicationCommand {
         project_id: String,
         session_id: Uuid,
     },
+    /// Permanently remove a selected project's indexed history.
+    DeleteSession {
+        project_id: String,
+        session_id: Uuid,
+    },
     /// Request cancellation of an in-flight operation.
     CancelRequest { request_id: Uuid },
     /// Return configured provider names and their public model metadata.
@@ -170,6 +181,11 @@ pub enum ApplicationEvent {
     },
     /// History was loaded into the backend; the UI only receives metadata.
     SessionRestored(SessionDto),
+    /// An indexed session was removed from the project.
+    SessionDeleted {
+        project_id: String,
+        session_id: Uuid,
+    },
     /// Confirms that cancellation was requested for an operation.
     RequestCancelled { request_id: Uuid },
     /// Models available from the configured provider registry.
@@ -444,6 +460,9 @@ impl ApplicationService {
                             provider: session.provider.clone(),
                             model: session.model.clone(),
                             message_count: 0,
+                            created_at: None,
+                            updated_at: None,
+                            title: None,
                         }),
                 })
                 .collect(),
@@ -541,7 +560,11 @@ impl ApplicationService {
                 "session index differs from history".into(),
             ));
         }
-        self.validate_history(project_id, config, &history, &entry.provider)
+        let mut session = self.validate_history(project_id, config, &history, &entry.provider)?;
+        session.created_at = Some(entry.created_at);
+        session.updated_at = Some(entry.updated_at);
+        session.title = entry.title.clone();
+        Ok(session)
     }
 
     /// Lists persisted sessions newest first; corrupt histories are reported instead of hidden.
@@ -644,6 +667,9 @@ impl ApplicationService {
             provider: provider.to_owned(),
             model: history.model().to_owned(),
             message_count: history.messages().len(),
+            created_at: None,
+            updated_at: None,
+            title: None,
         })
     }
 
@@ -699,6 +725,46 @@ impl ApplicationService {
         self.restored_histories.insert(session_id, history);
         self.sessions.insert(session_id, session.clone());
         Ok(session)
+    }
+
+    /// Deletes only a validated, indexed history in the requested project.
+    pub fn delete_session(&mut self, project_id: &str, session_id: Uuid) -> Result<(), AppError> {
+        let config = self
+            .configs
+            .get(project_id)
+            .ok_or_else(|| AppError::InvalidConfig(format!("project not found: {project_id}")))?;
+        let store = ProjectSessionStore::new(&config.project_dir);
+        let entry = store
+            .load()?
+            .sessions
+            .into_iter()
+            .find(|entry| entry.id == session_id)
+            .ok_or_else(|| {
+                AppError::SessionPersistence("session is not indexed in this project".into())
+            })?;
+        self.indexed_session(project_id, config, &store, &entry)?;
+        store.delete(session_id)?;
+        self.sessions.remove(&session_id);
+        self.agents.remove(&session_id);
+        self.restored_histories.remove(&session_id);
+        let mut next = self.launch_state.clone();
+        if let Some(project) = next
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+            .filter(|project| project.last_session_id == Some(session_id))
+        {
+            project.last_session_id = None;
+            project.last_session = None;
+            if next.last_project_id.as_deref() == Some(project_id) {
+                next.last_session_id = None;
+            }
+        }
+        if let Some(state) = &self.launch_state_store {
+            state.save(&next)?;
+        }
+        self.launch_state = next;
+        Ok(())
     }
 
     /// Returns the capabilities advertised by this service instance.
@@ -886,6 +952,9 @@ impl ApplicationService {
             provider,
             model,
             message_count: 0,
+            created_at: None,
+            updated_at: None,
+            title: None,
         };
         if let Some(config) = self.configs.get(project_id) {
             let history = Session::new_with_id(session.id, &config.working_dir, &session.model)
@@ -895,6 +964,14 @@ impl ApplicationService {
                 .create(&history, &session.provider)
                 .map_err(|error| error.to_string())?;
             let retained = store.load().map_err(|error| error.to_string())?;
+            let entry = retained
+                .sessions
+                .iter()
+                .find(|item| item.id == session.id)
+                .unwrap();
+            let mut session = session;
+            session.created_at = Some(entry.created_at);
+            session.updated_at = Some(entry.updated_at);
             self.sessions.retain(|id, entry| {
                 entry.project_id != project_id
                     || retained.sessions.iter().any(|item| item.id == *id)
@@ -907,6 +984,8 @@ impl ApplicationService {
                 retained.sessions.iter().any(|item| item.id == *id)
                     || self.sessions.contains_key(id)
             });
+            self.sessions.insert(session.id, session.clone());
+            return Ok(session);
         }
         self.sessions.insert(session.id, session.clone());
         Ok(session)
@@ -1031,7 +1110,11 @@ impl ApplicationService {
         let store = ProjectSessionStore::new(&config.project_dir);
         let path = store.history_path(session_id);
         let persisted = Session::load_from(&path)?;
-        if persisted.id() != session_id || persisted.model() != session_dto.model {
+        if persisted.id() != session_id
+            || persisted.model() != session_dto.model
+            || persisted.working_dir().canonicalize().ok().as_deref()
+                != Some(config.working_dir.as_path())
+        {
             return Err(AppError::SessionPersistence(
                 "session history changed".into(),
             ));
@@ -1054,6 +1137,15 @@ impl ApplicationService {
         store.checkpoint(&runtime.session)?;
         if let Some(dto) = self.sessions.get_mut(&session_id) {
             dto.message_count = message_count;
+            if let Some(entry) = store
+                .load()?
+                .sessions
+                .into_iter()
+                .find(|entry| entry.id == session_id)
+            {
+                dto.title = entry.title;
+                dto.updated_at = Some(entry.updated_at);
+            }
         }
         let response = response?;
         self.persist_active_session(&session_dto)?;
@@ -1191,6 +1283,16 @@ impl ApplicationService {
                 project_id,
                 session_id,
             } => ApplicationEvent::SessionRestored(self.restore_session(&project_id, session_id)?),
+            ApplicationCommand::DeleteSession {
+                project_id,
+                session_id,
+            } => {
+                self.delete_session(&project_id, session_id)?;
+                ApplicationEvent::SessionDeleted {
+                    project_id,
+                    session_id,
+                }
+            }
             ApplicationCommand::CancelRequest { request_id } => {
                 if !self.cancel_request(request_id) {
                     return Err(AppError::InvalidConfig(format!(
@@ -1285,7 +1387,7 @@ mod tests {
 
         assert_eq!(json["type"], "open_project");
         assert_eq!(json["payload"]["path"], "/tmp/project");
-        assert_eq!(APPLICATION_API_VERSION, 3);
+        assert_eq!(APPLICATION_API_VERSION, 4);
     }
 
     #[test]
@@ -1293,7 +1395,7 @@ mod tests {
         let json = serde_json::to_value(ApplicationCommand::GetStartupState).unwrap();
 
         assert_eq!(json["type"], "get_startup_state");
-        assert_eq!(APPLICATION_API_VERSION, 3);
+        assert_eq!(APPLICATION_API_VERSION, 4);
     }
 
     #[test]
@@ -1851,8 +1953,9 @@ mod tests {
         assert_eq!(sessions.len(), 2);
         assert_eq!(sessions[0].id, first.id);
         assert_eq!(sessions[0].message_count, 1);
+        assert_eq!(sessions[0].title.as_deref(), Some("private content"));
         assert!(
-            !serde_json::to_string(&sessions)
+            !serde_json::to_string(&restarted.startup_state())
                 .unwrap()
                 .contains("private content")
         );
@@ -1921,6 +2024,71 @@ mod tests {
                 .unwrap()
                 .iter()
                 .all(|s| s.id != legacy.id())
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn delete_session_clears_active_selection_and_preserves_legacy_and_other_project() {
+        let root = std::env::temp_dir().join(format!("desktop-delete-{}", Uuid::new_v4()));
+        let first = root.join("first");
+        let second = root.join("second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        let state = LaunchStateStore::new(root.join("user/state.json"));
+        let mut service = ApplicationService::with_launch_state_store(state.clone()).unwrap();
+        let open = |service: &mut ApplicationService, path| match service
+            .execute(Uuid::new_v4(), ApplicationCommand::OpenProject { path })
+            .unwrap()
+            .payload
+        {
+            ApplicationEvent::ProjectOpened(project) => project,
+            _ => panic!(),
+        };
+        let project = open(&mut service, first.clone());
+        let other = open(&mut service, second.clone());
+        let legacy = Session::new(&first, "demo-model").unwrap();
+        legacy.save_to(first.join(".aiagent/session.json")).unwrap();
+        let selected = service.restore_session(&project.id, legacy.id()).unwrap();
+        assert_eq!(selected.id, legacy.id());
+        let foreign = service
+            .create_session(&other.id, "litellm".into(), "demo-model".into())
+            .unwrap();
+        assert!(service.delete_session(&other.id, legacy.id()).is_err());
+        let command = ApplicationCommand::DeleteSession {
+            project_id: project.id.clone(),
+            session_id: legacy.id(),
+        };
+        let json = serde_json::to_value(&command).unwrap();
+        assert_eq!(json["type"], "delete_session");
+        assert_eq!(
+            serde_json::from_value::<ApplicationCommand>(json).unwrap(),
+            command
+        );
+        let event = service.execute(Uuid::new_v4(), command).unwrap();
+        assert!(
+            matches!(event.payload, ApplicationEvent::SessionDeleted { session_id, .. } if session_id == legacy.id())
+        );
+        assert!(service.list_sessions(&project.id).is_empty());
+        assert!(service.available_sessions(&project.id).unwrap().is_empty());
+        assert!(service.restorable_session(&project.id).unwrap().is_none());
+        assert!(service.restore_session(&project.id, legacy.id()).is_err());
+        assert!(service.delete_session(&project.id, legacy.id()).is_err());
+        assert_eq!(
+            service.available_sessions(&other.id).unwrap()[0].id,
+            foreign.id
+        );
+        assert!(first.join(".aiagent/session.json").exists());
+        let reopened = ApplicationService::with_launch_state_store(state).unwrap();
+        assert!(
+            reopened
+                .startup_state()
+                .recent_projects
+                .iter()
+                .find(|item| item.id == project.id)
+                .unwrap()
+                .last_session
+                .is_none()
         );
         fs::remove_dir_all(root).unwrap();
     }

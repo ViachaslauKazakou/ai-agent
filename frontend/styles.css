@@ -101,8 +101,6 @@ input:focus, textarea:focus, select:focus { border-color: #8eb9a7; }
 .send-button { min-width: 82px; cursor: pointer; }
 .composer button:disabled { cursor: not-allowed; opacity: .45; }
 .composer textarea { font: inherit; }
-.attachments { display: flex; gap: 6px; flex-wrap: wrap; }
-.attachment-chip { border: 1px solid #4b6870; border-radius: 3px; padding: 4px 8px; color: #c9d7d7; font: .68rem ui-monospace, SFMono-Regular, Menlo, monospace; }
 .used-tools { max-width: 360px; overflow: hidden; color: #8eb9a7; text-overflow: ellipsis; white-space: nowrap; font: .68rem ui-monospace, SFMono-Regular, Menlo, monospace; }
 .bottom-dock { flex: 0 0 auto; }
 .trace-panel { padding: 7px 2px 0; color: #9daeb1; font: 0.7rem ui-monospace, SFMono-Regular, Menlo, monospace; }

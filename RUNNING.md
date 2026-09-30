@@ -191,7 +191,11 @@ The Tauri window opens the launcher through the local Vite server. In the UI:
     click `Create session`. Use `Recent sessions` and `Continue selected session`
     to switch back. `Create session` starts a separate history, including when a
     session is already active. Up to ten recent sessions are kept per project;
-    creating the eleventh deletes the least recently updated. A corrupt or
+     creating the eleventh deletes the least recently updated. The dropdown
+     shows a short first-prompt title and last-update time. `Delete selected
+     session` asks for confirmation and removes only its Desktop history; the
+     legacy CLI copy is unaffected. File attachments are not supported yet;
+     there is no Attach button. A corrupt or
     incompatible history is kept intact and reported; repair it before creating
     new sessions.
 5. Enter a prompt and click `Send`. Desktop does not stop at 20 tool rounds;

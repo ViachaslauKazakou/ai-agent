@@ -83,6 +83,7 @@
           <label class="field-label session-label" for="saved-sessions">Recent sessions (up to 10)</label>
           <select id="saved-sessions" class="select-input" disabled><option value="">No saved sessions</option></select>
           <button id="restore-saved-session" class="secondary-button" type="button" disabled>Continue selected session</button>
+          <button id="delete-saved-session" class="secondary-button" type="button" disabled>Delete selected session</button>
           <div class="meta-grid">
             <div class="meta-card"><span class="meta-label">API</span><strong id="api-version">—</strong></div>
             <div class="meta-card"><span class="meta-label">Capabilities</span><strong id="capabilities">—</strong></div>
@@ -107,12 +108,10 @@
             </article>
           </div>
           <form id="composer" class="composer">
-            <div id="attachments" class="attachments" hidden></div>
             <textarea id="prompt" rows="1" placeholder="Ask the agent about this project…" disabled></textarea>
             <div class="composer-toolbar">
               <div class="toolbar-actions">
                 <button id="quote" class="toolbar-button" type="button" title="Quote selected text">❝ <span>Quote</span></button>
-                <button id="attach" class="toolbar-button" type="button" title="Attach a file">＋ <span>Attach file</span></button>
                 <span id="used-tools" class="used-tools" hidden></span>
               </div>
               <button id="send" class="send-button" type="submit" disabled>Send <span>↗</span></button>
