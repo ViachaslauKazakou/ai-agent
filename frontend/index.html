@@ -186,20 +186,7 @@
         <div class="settings-actions"><button id="assistant-prompt-delete" class="toolbar-button" type="button">Delete selected</button><span id="assistant-prompt-status" class="settings-status" role="status"></span><button id="assistant-prompt-save" class="primary-button" type="button">Save preset</button></div>
       </form>
     </dialog>
-    <script>
-      // Keep startup failures visible in the window. A module import can fail
-      // before app.js runs, which otherwise leaves the initial status frozen.
-      window.reportFrontendError = (error) => {
-        const status = document.querySelector("#status");
-        if (status) status.textContent = `Frontend error: ${String(error)}`;
-      };
-      window.addEventListener("error", (event) => {
-        window.reportFrontendError(event.error?.message || event.message);
-      });
-      window.addEventListener("unhandledrejection", (event) => {
-        window.reportFrontendError(event.reason);
-      });
-    </script>
-    <script type="module" src="./app.js" onerror="window.reportFrontendError('failed to load app.js')"></script>
+    <script src="./startup-error.js"></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>

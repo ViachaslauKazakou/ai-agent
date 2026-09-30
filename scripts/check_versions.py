@@ -23,7 +23,13 @@ for name, actual in (
     ("frontend", package["version"]),
     ("frontend lockfile", lock["version"]),
     ("frontend lockfile root", lock["packages"][""]["version"]),
-    *((f"Cargo.lock {name}", next(package["version"] for package in cargo_lock["package"] if package["name"] == name)) for name in ("ai-agent", "via-agent")),
+    *(
+        (f"Cargo.lock {name}", next(
+            package["version"] for package in cargo_lock["package"]
+            if package["name"] == name
+        ))
+        for name in ("ai-agent", "via-agent")
+    ),
 ):
     if actual != version:
         raise SystemExit(f"{name} version {actual} does not match Cargo {version}")

@@ -19,13 +19,6 @@ import {
 
 document.querySelector("#app-version").textContent = `via-agent v${__APP_VERSION__}`;
 
-if (typeof window.reportFrontendError === "function") {
-  window.reportFrontendError = (error) => {
-    const status = document.querySelector("#status");
-    if (status) status.textContent = `Frontend error: ${String(error)}`;
-  };
-}
-
 const status = document.querySelector("#status");
 const launcher = document.querySelector("#launcher");
 const workspace = document.querySelector("#workspace");

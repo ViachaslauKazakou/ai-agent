@@ -128,6 +128,7 @@ jobs:
             esac
             NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           fi
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$NEW_VERSION"
           while git show-ref --tags --verify --quiet "refs/tags/v$NEW_VERSION"; do
             PATCH=$((PATCH + 1))
             NEW_VERSION="$MAJOR.$MINOR.$PATCH"
