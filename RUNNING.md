@@ -1,4 +1,4 @@
-# Running via-agent 1.0.1
+# Running via-agent
 
 This guide explains how to configure and run both clients:
 
@@ -170,10 +170,19 @@ The Tauri window opens the launcher through the local Vite server. In the UI:
    directory.
 3. Click `Open project`. The chat workspace appears only after Rust validates
    the path and loads its configuration.
-4. If a previous Desktop session exists, its provider and model are restored
-   and the composer is activated. Otherwise select a provider and model, then
-   click `Create session`.
-5. Enter a prompt and click `Send`.
+4. If a compatible indexed session or legacy `.aiagent/session.json` exists, its UUID, provider, model
+   and history are restored in the backend; the UI displays a message count,
+   not the previous conversation. Otherwise select a provider and model, then
+    click `Create session`. Use `Recent sessions` and `Continue selected session`
+    to switch back. `Create session` starts a separate history, including when a
+    session is already active. Up to ten recent sessions are kept per project;
+    creating the eleventh deletes the least recently updated. A corrupt or
+    incompatible history is kept intact and reported; repair it before creating
+    new sessions.
+5. Enter a prompt and click `Send`. Desktop does not stop at 20 tool rounds;
+   it continues until the agent finishes or the configured `max_loop_seconds`
+   timeout is reached (600 seconds by default). CLI requests still honor
+   `max_tool_rounds`.
 6. Use `Switch project` to return to the launcher. The active project and
    session selection are cleared, while persisted recent projects remain.
 
@@ -217,9 +226,16 @@ make desktop-install
 via-agent
 ```
 
-Desktop `--working-dir` argument handling is planned but not implemented yet.
-Choose the directory from the startup screen. The console command below already
-supports `--working-dir`.
+Open an existing project directly, or choose one from the launcher:
+
+```bash
+via-agent --working-dir /path/to/project
+```
+
+Invalid direct-open paths are reported to stderr and leave the launcher
+available. Desktop histories are stored in `.aiagent/sessions/`; legacy
+`.aiagent/session.json` is copied when first restored or before creating a
+new Desktop session, and remains available to the CLI.
 
 The console command remains:
 

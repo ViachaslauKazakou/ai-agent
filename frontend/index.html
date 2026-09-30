@@ -80,6 +80,9 @@
           <label class="field-label model-label" for="model">Model</label>
           <input id="model" type="text" value="demo-model" autocomplete="off" disabled />
           <button id="create-session" class="secondary-button" type="button" disabled>Create session</button>
+          <label class="field-label session-label" for="saved-sessions">Recent sessions (up to 10)</label>
+          <select id="saved-sessions" class="select-input" disabled><option value="">No saved sessions</option></select>
+          <button id="restore-saved-session" class="secondary-button" type="button" disabled>Continue selected session</button>
           <div class="meta-grid">
             <div class="meta-card"><span class="meta-label">API</span><strong id="api-version">—</strong></div>
             <div class="meta-card"><span class="meta-label">Capabilities</span><strong id="capabilities">—</strong></div>

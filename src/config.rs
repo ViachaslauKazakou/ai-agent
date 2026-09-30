@@ -138,6 +138,8 @@ pub struct Config {
     /// Имя модели.
     pub model: String,
     pub reasoning_effort: String,
+    /// Canonical root owning `.aiagent` configuration files.
+    pub project_dir: PathBuf,
     /// Абсолютная существующая рабочая директория.
     pub working_dir: PathBuf,
     /// Лимит будущих раундов инструментов.
@@ -179,6 +181,7 @@ impl fmt::Debug for Config {
             .field("providers", &self.providers.names().collect::<Vec<_>>())
             .field("model", &self.model)
             .field("reasoning_effort", &self.reasoning_effort)
+            .field("project_dir", &self.project_dir)
             .field("working_dir", &self.working_dir)
             .field("max_tool_rounds", &self.max_tool_rounds)
             .field("request_timeout_secs", &self.request_timeout_secs)
@@ -236,6 +239,7 @@ impl Config {
             "model": self.model,
             "reasoning_effort": self.reasoning_effort,
             "working_dir": self.working_dir,
+            "project_dir": self.project_dir,
             "max_tool_rounds": self.max_tool_rounds,
             "request_timeout_secs": self.request_timeout_secs,
             "log_level": self.log_level,
@@ -356,9 +360,11 @@ impl Config {
             };
         let mut cli = cli.clone();
         if cli.working_dir.is_none() && !environment.contains_key("WORKING_DIR") {
-            cli.working_dir = Some(project_dir);
+            cli.working_dir = Some(project_dir.clone());
         }
-        Self::from_sources_with_file(&cli, &environment, file, providers)
+        let mut result = Self::from_sources_with_file(&cli, &environment, file, providers)?;
+        result.project_dir = project_dir;
+        Ok(result)
     }
 
     pub fn save_model(&self, model: &str) -> Result<(), AppError> {
@@ -368,11 +374,11 @@ impl Config {
     /// Persists the active provider and model while leaving provider secrets in
     /// the separate providers registry.
     pub fn save_selection(&self, provider: &str, model: &str) -> Result<(), AppError> {
-        persist_selection(&self.working_dir, provider, model)
+        persist_selection(&self.project_dir, provider, model)
     }
 
     pub fn save_reasoning_effort(&self, effort: &str) -> Result<(), AppError> {
-        persist_reasoning_effort(&self.working_dir, effort)
+        persist_reasoning_effort(&self.project_dir, effort)
     }
 
     /// Собирает конфигурацию из defaults, переданного окружения и CLI.
@@ -600,6 +606,7 @@ impl Config {
             api_key,
             model,
             reasoning_effort,
+            project_dir: resolved_working_dir.clone(),
             working_dir: resolved_working_dir,
             max_tool_rounds,
             request_timeout_secs,

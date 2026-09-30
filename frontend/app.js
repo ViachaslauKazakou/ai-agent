@@ -38,6 +38,8 @@ const models = document.querySelector("#models");
 const providerInput = document.querySelector("#provider");
 const modelInput = document.querySelector("#model");
 const createSessionButton = document.querySelector("#create-session");
+const savedSessions = document.querySelector("#saved-sessions");
+const restoreSavedButton = document.querySelector("#restore-saved-session");
 const session = document.querySelector("#session");
 const messages = document.querySelector("#messages");
 const trace = document.querySelector("#trace");
@@ -66,6 +68,50 @@ let activityTimer;
 let availableProviders = [];
 let appState = createAppState();
 let pendingRestoredSession;
+let projectSessions = [];
+let busy = false;
+
+function renderSavedSessions() {
+  const selected = savedSessions.value || activeSession?.id;
+  savedSessions.replaceChildren();
+  for (const item of projectSessions) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = `${item.provider} / ${item.model} · ${item.id.slice(0, 8)} (${item.message_count} messages)`;
+    savedSessions.append(option);
+  }
+  if (projectSessions.some((item) => item.id === selected)) savedSessions.value = selected;
+  if (!projectSessions.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No saved sessions";
+    savedSessions.append(option);
+  }
+  savedSessions.disabled = busy || !projectSessions.length;
+  restoreSavedButton.disabled = busy || !projectSessions.length;
+}
+
+async function refreshSessions() {
+  const envelope = await execute({ type: "list_sessions", payload: { project_id: activeProject.id } });
+  projectSessions = eventPayload(envelope, "sessions_listed").sessions;
+  renderSavedSessions();
+}
+
+function activateSession(value, restored = false) {
+  activeSession = value;
+  session.textContent = `${value.provider} / ${value.model} · ${value.id.slice(0, 8)}`;
+  providerInput.value = value.provider;
+  modelInput.value = value.model;
+  modelInput.dataset.provider = value.provider;
+  renderModels(availableProviders);
+  createSessionButton.disabled = busy;
+  promptInput.disabled = false;
+  sendButton.disabled = false;
+  resetConversation();
+  if (restored) messages.querySelector("p").textContent = `${value.message_count} previous messages are loaded in the backend. Previous messages are not displayed yet.`;
+  status.textContent = restored ? `Session restored · ${value.model}` : "Session ready";
+  savedSessions.value = value.id;
+}
 
 function renderRoute() {
   const inWorkspace = appState.route === ROUTES.WORKSPACE;
@@ -160,7 +206,7 @@ function providersFrom(envelope) {
 // explicitly creates the session.
 function renderModels(providerList) {
   availableProviders = providerList;
-  const selectedProvider = providerInput.value;
+  const selectedProvider = modelInput.dataset.provider || providerInput.value;
   providerInput.replaceChildren();
   for (const provider of providerList) {
     const option = document.createElement("option");
@@ -193,7 +239,12 @@ function renderModels(providerList) {
     button.dataset.model = entry.model;
     button.dataset.provider = entry.provider;
     button.title = `${entry.provider} / ${entry.model}`;
-    button.innerHTML = `<span>${entry.model}</span><small>${entry.provider}</small>`;
+    const title = document.createElement("span");
+    title.textContent = entry.model;
+    const subtitle = document.createElement("small");
+    subtitle.textContent = entry.provider;
+    button.append(title, subtitle);
+    if (entry.model === modelInput.value && entry.provider === providerInput.value) button.classList.add("selected");
     button.addEventListener("click", () => {
       modelInput.value = entry.model;
       providerInput.value = entry.provider;
@@ -392,6 +443,8 @@ async function loadCapabilities() {
       ? "Continue with a recent project or choose another directory."
       : "Choose a directory to create your first desktop workspace.";
     logStep("startup complete", `${appState.startup.recentProjects.length} recent project(s)`);
+    const directPath = await invoke("initial_project_path");
+    if (directPath) await openProject(directPath);
   } catch (error) {
     showError(error);
   }
@@ -410,38 +463,37 @@ async function openProject(path) {
       payload: { path },
     });
     const project = eventPayload(envelope, "project_opened");
-    appState = completeProjectOpen(appState, project);
     activeProject = project;
-    renderRoute();
     logStep("project opened", `${project.id}: ${project.path}`);
     createSessionButton.disabled = false;
+    activeSession = undefined;
+    projectSessions = [];
+    renderSavedSessions();
+    promptInput.disabled = true;
+    sendButton.disabled = true;
+    resetConversation();
     status.textContent = "Project opened; refreshing models…";
+    const sessionsEnvelope = await execute({
+      type: "get_restorable_session",
+      payload: { project_id: activeProject.id },
+    });
+    pendingRestoredSession = eventPayload(sessionsEnvelope, "restorable_session").session;
     const modelEnvelope = await refreshModels(activeProject.id);
     const providerList = providersFrom(modelEnvelope);
     renderModels(providerList);
-    const sessionsEnvelope = await execute({
-      type: "list_sessions",
-      payload: { project_id: activeProject.id },
-    });
-    const restoredSessions = eventPayload(sessionsEnvelope, "sessions_listed").sessions || [];
-    pendingRestoredSession = restoredSessions[0];
     if (pendingRestoredSession) {
-      activeSession = pendingRestoredSession;
-      const provider = providerList.find((item) => item.name === activeSession.provider);
-      if (provider) {
-        selectProvider(provider.name);
-        modelInput.value = activeSession.model;
-        modelInput.dataset.provider = activeSession.provider;
-      }
-      session.textContent = `${activeSession.model} · ${activeSession.id.slice(0, 8)}`;
-      promptInput.disabled = false;
-      sendButton.disabled = false;
-      status.textContent = `Session restored · ${activeSession.model}`;
+      const restored = await execute({
+        type: "restore_session",
+        payload: { project_id: activeProject.id, session_id: pendingRestoredSession.id },
+      });
+      activateSession(eventPayload(restored, "session_restored"), true);
     } else {
       const selectedProvider = providerList.find((provider) => provider.models.includes(modelInput.value));
       if (selectedProvider) selectProvider(selectedProvider.name);
       status.textContent = `Open: ${project.id}`;
     }
+    await refreshSessions();
+    if (activeSession) savedSessions.value = activeSession.id;
     const item = document.createElement("article");
     item.className = "message assistant";
     item.innerHTML = `<span class="message-label">PROJECT</span><p></p>`;
@@ -450,8 +502,18 @@ async function openProject(path) {
     const startupEnvelope = await execute({ type: "get_startup_state" });
     appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
     renderRecentProjects();
+    appState = completeProjectOpen(appState, project);
+    renderRoute();
   } catch (error) {
     appState = failProjectOpen(appState);
+    activeProject = undefined;
+    activeSession = undefined;
+    pendingRestoredSession = undefined;
+    createSessionButton.disabled = true;
+    projectSessions = [];
+    renderSavedSessions();
+    promptInput.disabled = true;
+    sendButton.disabled = true;
     renderRoute();
     showError(error);
   } finally {
@@ -478,20 +540,49 @@ document.querySelector("#choose-project").addEventListener("click", async () => 
 });
 
 createSessionButton.addEventListener("click", async () => {
-  if (!activeProject) return;
+  if (!activeProject || busy) return;
+  busy = true;
+  createSessionButton.disabled = true;
+  renderSavedSessions();
   try {
     const envelope = await execute({
       type: "create_session",
       payload: { project_id: activeProject.id, provider: modelInput.dataset.provider || "litellm", model: modelInput.value },
     });
     const created = eventPayload(envelope, "session_created");
-    activeSession = created;
-    session.textContent = `${created.model} · ${created.id.slice(0, 8)}`;
-    promptInput.disabled = false;
-    sendButton.disabled = false;
-    status.textContent = "Session ready";
+    activateSession(created);
+    await refreshSessions();
+    savedSessions.value = created.id;
+    const startupEnvelope = await execute({ type: "get_startup_state" });
+    appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
+    renderRecentProjects();
   } catch (error) {
     showError(error);
+  } finally {
+    busy = false;
+    createSessionButton.disabled = false;
+    renderSavedSessions();
+  }
+});
+
+restoreSavedButton.addEventListener("click", async () => {
+  if (!activeProject || !savedSessions.value || busy) return;
+  const selectedId = savedSessions.value;
+  busy = true;
+  createSessionButton.disabled = true;
+  renderSavedSessions();
+  try {
+    const envelope = await execute({ type: "restore_session", payload: { project_id: activeProject.id, session_id: selectedId } });
+    activateSession(eventPayload(envelope, "session_restored"), true);
+    const startupEnvelope = await execute({ type: "get_startup_state" });
+    appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
+    renderRecentProjects();
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy = false;
+    createSessionButton.disabled = false;
+    renderSavedSessions();
   }
 });
 
@@ -503,6 +594,8 @@ switchProjectButton.addEventListener("click", async () => {
   attachedFiles = [];
   usedToolNames.clear();
   availableProviders = [];
+  projectSessions = [];
+  renderSavedSessions();
   createSessionButton.disabled = true;
   promptInput.disabled = true;
   sendButton.disabled = true;
@@ -533,9 +626,12 @@ providerInput.addEventListener("change", () => selectProvider(providerInput.valu
 composer.addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = promptInput.value.trim();
-  if (!activeSession || !prompt) return;
+  if (!activeSession || !prompt || busy) return;
   promptInput.disabled = true;
   sendButton.disabled = true;
+  busy = true;
+  createSessionButton.disabled = true;
+  renderSavedSessions();
   setThinking(true);
   usedToolNames.clear();
   renderUsedTools();
@@ -568,6 +664,10 @@ composer.addEventListener("submit", async (event) => {
   } catch (error) {
     showError(error);
   } finally {
+    busy = false;
+    createSessionButton.disabled = false;
+    await refreshSessions().catch(showError);
+    if (activeSession) savedSessions.value = activeSession.id;
     stopActivityPolling();
     setThinking(false);
     promptInput.disabled = false;

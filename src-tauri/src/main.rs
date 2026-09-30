@@ -9,7 +9,7 @@ use ai_agent::application::{
     SettingsDocuments,
 };
 use ai_agent::LaunchStateStore;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tauri::State;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -19,6 +19,41 @@ struct DesktopState(Mutex<ApplicationService>);
 
 /// Redacted current tool name shared with the desktop timeline.
 struct DesktopActivity(Arc<std::sync::Mutex<Option<String>>>);
+
+/// A validated launch path shown once on the launcher before activation.
+struct DirectOpen(Option<PathBuf>);
+
+/// Parses the optional desktop path; invalid flags never silently open a project.
+fn direct_open_path(args: impl IntoIterator<Item = String>) -> Result<Option<PathBuf>, String> {
+    let mut args = args.into_iter();
+    let _binary = args.next();
+    let Some(flag) = args.next() else {
+        return Ok(None);
+    };
+    if flag != "--working-dir" {
+        return Err(format!("unsupported desktop argument: {flag}"));
+    }
+    let path = args.next().ok_or("--working-dir requires a directory")?;
+    if args.next().is_some() {
+        return Err("unexpected additional desktop arguments".to_owned());
+    }
+    let path = PathBuf::from(path);
+    if !path.is_dir() {
+        return Err(format!(
+            "direct-open directory unavailable: {}",
+            path.display()
+        ));
+    }
+    path.canonicalize()
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+/// Supplies a prevalidated launch path without granting WebView filesystem access.
+#[tauri::command]
+fn initial_project_path(path: State<'_, DirectOpen>) -> Option<PathBuf> {
+    path.0.clone()
+}
 
 /// Executes one versioned application command through the shared service.
 ///
@@ -139,13 +174,22 @@ fn tool_activity(activity: State<'_, DesktopActivity>) -> Option<String> {
 
 /// Returns the Tauri application and registers the stateful command adapter.
 fn main() {
+    let launch_path = match direct_open_path(std::env::args()) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("[desktop] direct-open ignored: {error}");
+            None
+        }
+    };
     let service = desktop_service();
     tauri::Builder::default()
+        .manage(DirectOpen(launch_path))
         .manage(DesktopState(Mutex::new(service)))
         .manage(DesktopActivity(Arc::new(std::sync::Mutex::new(None))))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             execute_command,
+            initial_project_path,
             refresh_models,
             send_message,
             tool_activity,
@@ -175,5 +219,31 @@ fn desktop_service() -> ApplicationService {
             eprintln!("[desktop] launch state disabled: {error}");
             ApplicationService::new()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::direct_open_path;
+
+    #[test]
+    fn direct_open_accepts_only_an_existing_directory() {
+        let path = std::env::temp_dir();
+        let parsed = direct_open_path([
+            "via-agent".to_owned(),
+            "--working-dir".to_owned(),
+            path.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert_eq!(parsed, Some(path.canonicalize().unwrap()));
+        assert!(direct_open_path([
+            "via-agent".to_owned(),
+            "--working-dir".to_owned(),
+            path.join("missing").to_string_lossy().into_owned()
+        ])
+        .is_err());
+        assert!(direct_open_path(["via-agent".to_owned(), "--working-dir".to_owned()]).is_err());
+        assert!(direct_open_path(["via-agent".to_owned(), "--other".to_owned()]).is_err());
+        assert_eq!(direct_open_path(["via-agent".to_owned()]).unwrap(), None);
     }
 }

@@ -21,6 +21,7 @@ pub mod memory;
 pub mod project_intelligence;
 pub mod scheduler;
 pub mod security_review;
+pub mod session_store;
 pub mod tools;
 pub mod word_processing;
 

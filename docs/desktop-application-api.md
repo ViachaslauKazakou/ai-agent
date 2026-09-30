@@ -32,6 +32,8 @@ Tauri IPC or a loopback browser transport.
 - `list_projects`
 - `create_session`
 - `list_sessions`
+- `get_restorable_session`
+- `restore_session`
 - `cancel_request`
 - `list_models`
 - `refresh_models`
@@ -59,6 +61,45 @@ launch-state document. Recent projects keep stable opaque IDs across desktop
 processes and include an `available` flag so a launcher can render moved or
 deleted paths without failing startup. Listing this state never initializes or
 modifies a project; `open_project` remains the explicit activation boundary.
+
+The application protocol is now **version 3** (`APPLICATION_API_VERSION`).
+`get_restorable_session` returns `restorable_session` with an optional
+`SessionDto` (UUID, project ID, provider, model, message count), never message
+bodies. `restore_session` requires both project ID and a listed UUID;
+it emits `session_restored` only after loading and validating the indexed history
+or migrating `<project>/.aiagent/session.json`. The file's working directory must match
+the configured canonical tool directory. Provider/model must exist in the
+project registry; indexed histories use their stored provider, while legacy
+histories use matching launch metadata or the current default. Incompatible/corrupt/stale
+files return an error and are not overwritten by discovery or restoration.
+The frontend currently reports the count of previous messages; rendering the
+full transcript is deferred to a later stage.
+
+`list_sessions` now returns up to ten persisted sessions for the opened project,
+newest updated first. `restore_session` accepts the UUID of any listed session.
+`create_session` creates an empty, separately persisted history even when a
+session is active. Histories live in `<project>/.aiagent/sessions/<uuid>.json`;
+`sessions/index.json` (schema version 1) records provider/model and creation/
+update timestamps, plus a migrated-legacy UUID tombstone. At the eleventh creation the least recently updated session
+is removed; opening a session does not alter its update timestamp. The index is
+published before deleting the old history, so interrupted cleanup may leave an
+unindexed orphan rather than delete a referenced history. Failed writes do not
+erase the existing indexed history. Corrupt/missing indexed histories cause an
+explicit error; they are never silently overwritten. Agent responses checkpoint
+their session independently, including partial histories on provider failure.
+
+Desktop prompts are not capped at the default 20 tool rounds: the model can
+continue calling tools until it produces a final response. The configured
+`max_loop_seconds` (600 seconds by default), tool permissions, and per-tool
+limits still apply. The CLI retains its configured `max_tool_rounds` behavior.
+
+Legacy `<project>/.aiagent/session.json` is copied into the index before a new
+session is created or that history is restored; the legacy file remains for the
+CLI. Incompatible or damaged legacy files block creation until repaired to
+avoid losing them. A legacy session not yet indexed is also shown in the list.
+The user-scoped launch state stores only the selected session UUID/provider/model
+and never contains conversation contents. The UI shows only message counts on
+restoration, not the full transcript.
 
 When Tauri starts, it constructs `ApplicationService` with a
 `LaunchStateStore`. A successful `open_project` loads project configuration
@@ -123,6 +164,10 @@ Tauri configuration. Choose a directory with the native `Choose...` button or
 enter an absolute path, then select `Open project`, create a session, and use
 the prompt field to send a request. The backend rejects missing paths before
 registration.
+
+`via-agent --working-dir /existing/project` preselects and opens that
+directory through the same application command. Invalid or unsupported
+arguments are reported on stderr and leave the launcher available.
 
 For a production package, run `cargo tauri build` from `src-tauri/` only after
 adding platform icons, signing identities and CI secrets through the target
