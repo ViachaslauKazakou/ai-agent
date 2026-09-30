@@ -52,7 +52,7 @@
             </div>
           </section>
           <section class="launch-panel launch-project">
-            <p class="eyebrow">CHAT-BOT SETUP</p>
+            <p class="eyebrow">PROJECT SETUP</p>
             <h3>Open a workspace</h3>
             <p id="launcher-feedback" class="launcher-feedback" aria-live="polite">Choose a recent project or select a directory.</p>
             <label class="field-label" for="project-path">Project path</label>
@@ -101,6 +101,23 @@
         </aside>
 
         <section class="chat-panel">
+          <section id="assistant-panel" class="assistant-panel" hidden aria-label="Assistant actions">
+            <div class="assistant-header"><div><span class="eyebrow">READ-ONLY WORKSPACE</span><h2>Assistant</h2></div><button id="assistant-refresh" class="toolbar-button" type="button">Refresh permissions</button></div>
+            <p class="settings-help">Mail, calendar, web and local documents use project tools. Assistant cannot modify files or send mail. Selected document content is processed in Rust and sent to your configured LLM on Send; choose files inside the project working directory.</p>
+            <div class="assistant-actions">
+              <button type="button" data-assistant-action="calendar">Calendar</button>
+              <button type="button" data-assistant-action="mail">Mail</button>
+              <button type="button" data-assistant-action="web_search">Web Search</button>
+              <button type="button" data-assistant-action="local_document">Local document</button>
+              <button type="button" disabled title="Cloud document connector not implemented">Cloud documents · planned</button>
+              <button type="button" disabled title="Document recognition not implemented">Recognition · planned</button>
+              <button type="button" disabled title="Document conversion not implemented">Conversion · planned</button>
+              <button type="button" disabled title="Document summary shortcut not implemented">Summary · planned</button>
+              <button type="button" disabled title="Document feedback shortcut not implemented">Feedback · planned</button>
+            </div>
+            <div class="assistant-presets"><label class="field-label" for="assistant-preset">My prompt presets (instructions, not autonomous subagents)</label><select id="assistant-preset"><option value="">Choose a preset…</option></select><button id="assistant-manage" type="button" class="toolbar-button">Manage prompts</button></div>
+            <p id="assistant-status" class="settings-status" role="status" aria-live="polite"></p>
+          </section>
           <div id="messages" class="messages" aria-live="polite">
             <article class="message assistant">
               <span class="message-label">SYSTEM</span>
@@ -149,6 +166,15 @@
           <span id="settings-status" class="settings-status"></span>
           <button id="save-settings" class="primary-button" type="button">Save configuration</button>
         </div>
+      </form>
+    </dialog>
+    <dialog id="assistant-dialog" class="settings-dialog">
+      <form method="dialog" class="settings-card">
+        <div class="settings-header"><div><span class="eyebrow">PROJECT ASSISTANT</span><h2>Custom prompts</h2></div><button class="icon-button" value="cancel" type="submit" aria-label="Close">×</button></div>
+        <p class="settings-help">Presets are project-local instructions, not permissions. They cannot enable tools. Up to 20 presets, 4000 characters each.</p>
+        <label class="field-label" for="assistant-prompt-name">Preset name</label><input id="assistant-prompt-name" maxlength="80" autocomplete="off" />
+        <label class="field-label" for="assistant-prompt-instruction">Instruction</label><textarea id="assistant-prompt-instruction" class="config-editor" maxlength="4000"></textarea>
+        <div class="settings-actions"><button id="assistant-prompt-delete" class="toolbar-button" type="button">Delete selected</button><span id="assistant-prompt-status" class="settings-status" role="status"></span><button id="assistant-prompt-save" class="primary-button" type="button">Save preset</button></div>
       </form>
     </dialog>
     <script>

@@ -6,7 +6,7 @@
 
 use ai_agent::application::{
     ApplicationCommand, ApplicationEnvelope, ApplicationEvent, ApplicationService,
-    SettingsDocuments,
+    AssistantCapabilitiesDto, AssistantPromptDto, SettingsDocuments,
 };
 use ai_agent::LaunchStateStore;
 use std::{path::PathBuf, sync::Arc};
@@ -166,6 +166,75 @@ async fn write_settings(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn assistant_capabilities(
+    state: State<'_, DesktopState>,
+    project_id: String,
+) -> Result<AssistantCapabilitiesDto, String> {
+    state
+        .0
+        .lock()
+        .await
+        .assistant_capabilities(&project_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn assistant_prompts(
+    state: State<'_, DesktopState>,
+    project_id: String,
+) -> Result<Vec<AssistantPromptDto>, String> {
+    state
+        .0
+        .lock()
+        .await
+        .assistant_prompts(&project_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_assistant_prompts(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    prompts: Vec<AssistantPromptDto>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .await
+        .save_assistant_prompts(&project_id, &prompts)
+        .map_err(|error| error.to_string())
+}
+
+/// Sends a read-only Assistant request, optionally reading a selected project document in Rust.
+#[tauri::command]
+async fn send_assistant_message(
+    state: State<'_, DesktopState>,
+    activity: State<'_, DesktopActivity>,
+    request_id: String,
+    session_id: String,
+    prompt: String,
+    document_path: Option<String>,
+) -> Result<ApplicationEnvelope<ApplicationEvent>, String> {
+    let request_id =
+        Uuid::parse_str(&request_id).map_err(|error| format!("invalid request id: {error}"))?;
+    let session_id =
+        Uuid::parse_str(&session_id).map_err(|error| format!("invalid session id: {error}"))?;
+    state
+        .0
+        .lock()
+        .await
+        .send_assistant_message(
+            request_id,
+            session_id,
+            &prompt,
+            document_path.as_deref(),
+            activity.0.clone(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
 /// Returns only the current tool name; arguments and results stay private.
 #[tauri::command]
 fn tool_activity(activity: State<'_, DesktopActivity>) -> Option<String> {
@@ -194,7 +263,11 @@ fn main() {
             send_message,
             tool_activity,
             read_settings,
-            write_settings
+            write_settings,
+            assistant_capabilities,
+            assistant_prompts,
+            save_assistant_prompts,
+            send_assistant_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running ai-agent desktop application");

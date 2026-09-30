@@ -151,6 +151,21 @@ provider request/response is awaited by the async Tauri command and the final
 assistant DTO is returned to the UI. Streaming text, live tool lifecycle events,
 and confirmation requests remain the next service-layer stage.
 
+Assistant uses `assistant_capabilities`, `assistant_prompts`,
+`save_assistant_prompts`, and `send_assistant_message` as thin Tauri commands
+over `ApplicationService`. Only project/session identifiers, prompt text and an
+optional selected document path cross IPC. The Rust service rechecks enabled
+tools and uses an explicit read-only registry and `allow_write=false` context;
+presets cannot widen permissions. Local documents are read by the registered
+MCP tool, bounded to 30 KB of extracted output before appending to the prompt,
+and never returned as raw tool results to the WebView. This prompt is saved in
+the project's session history and sent to its configured LLM provider; neither
+raw document contents nor prompt bodies appear in the execution log or global
+launch state. Prompt presets use versioned schema 1 in
+`<project>/.aiagent/assistant-prompts.json` and are replaced atomically; invalid
+or future-version files are preserved. Disabled capabilities do not imply that
+OAuth has been performed; connector failures are reported at execution time.
+
 ## Frontend integration direction
 
 The recommended desktop implementation is a Tauri 2 adapter over this API.

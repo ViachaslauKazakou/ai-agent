@@ -95,6 +95,15 @@ impl<P: LlmProvider> Agent<P> {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn permission_snapshot(&self) -> (Vec<String>, bool, bool) {
+        (
+            self.registry.names(),
+            self.context.allow_write,
+            self.context.auto_approve_patch,
+        )
+    }
+
     pub fn with_system_prompt(mut self, system_prompt: String) -> Self {
         self.system_prompt = Some(system_prompt);
         self

@@ -537,6 +537,7 @@ impl Config {
         }
 
         let allow_write = cli.allow_write || file_agent.allow_write.unwrap_or(false);
+        let explicit_tools = file_agent.enabled_tools.is_some();
         let enabled_tools = file_agent.enabled_tools.unwrap_or_else(|| {
             vec![
                 "read_file".to_owned(),
@@ -568,7 +569,8 @@ impl Config {
         let web_search_endpoint = environment.get("WEB_SEARCH_ENDPOINT").cloned();
         let web_search_api_key = environment.get("WEB_SEARCH_API_KEY").cloned();
         let mut enabled_tools = enabled_tools;
-        if (google_gmail_client_id.is_some() || microsoft_graph_client_id.is_some())
+        if !explicit_tools
+            && (google_gmail_client_id.is_some() || microsoft_graph_client_id.is_some())
             && !enabled_tools
                 .iter()
                 .any(|tool| tool == "list_recent_emails")
@@ -579,14 +581,15 @@ impl Config {
                 "search_emails".to_owned(),
             ]);
         }
-        if (google_calendar_client_id.is_some() || cfg!(target_os = "macos"))
+        if !explicit_tools
+            && (google_calendar_client_id.is_some() || cfg!(target_os = "macos"))
             && !enabled_tools
                 .iter()
                 .any(|tool| tool == "list_calendar_events")
         {
             enabled_tools.push("list_calendar_events".to_owned());
         }
-        if cfg!(target_os = "macos") {
+        if !explicit_tools && cfg!(target_os = "macos") {
             for tool in ["mcp_read_local_file", "mcp_web_search"] {
                 if !enabled_tools.iter().any(|enabled| enabled == tool) {
                     enabled_tools.push(tool.to_owned());
@@ -1135,6 +1138,28 @@ mod tests {
         assert_eq!(config.request_timeout_secs, 120);
         assert!(!config.verbose);
         assert!(config.working_dir.is_absolute());
+    }
+
+    #[test]
+    fn explicit_enabled_tools_override_automatic_connector_defaults() {
+        let file = FileConfig {
+            agent: Some(AgentFileConfig {
+                enabled_tools: Some(vec!["read_file".into()]),
+                ..Default::default()
+            }),
+        };
+        let environment = HashMap::from([
+            ("GOOGLE_GMAIL_CLIENT_ID".into(), "client".into()),
+            ("GOOGLE_CALENDAR_CLIENT_ID".into(), "client".into()),
+        ]);
+        let config = Config::from_sources_with_file(
+            &cli(&["--working-dir", "."]),
+            &environment,
+            file,
+            ProviderRegistry::default(),
+        )
+        .unwrap();
+        assert_eq!(config.enabled_tools, ["read_file"]);
     }
 
     #[test]

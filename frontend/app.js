@@ -4,6 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { createAssistantUI } from "./assistant-ui.js";
 import {
   ROUTES,
   applyStartupState,
@@ -68,6 +69,8 @@ let appState = createAppState();
 let pendingRestoredSession;
 let projectSessions = [];
 let busy = false;
+let selectedMode = "chatbot";
+const assistant = createAssistantUI({ invoke, open, promptInput, getProject: () => activeProject, getSession: () => activeSession, isBusy: () => busy });
 
 function renderSavedSessions() {
   const selected = savedSessions.value || activeSession?.id;
@@ -97,6 +100,7 @@ async function refreshSessions() {
 }
 
 function activateSession(value, restored = false) {
+  assistant.clearDocument();
   activeSession = value;
   session.textContent = `${value.provider} / ${value.model} · ${value.id.slice(0, 8)}`;
   providerInput.value = value.provider;
@@ -110,6 +114,7 @@ function activateSession(value, restored = false) {
   if (restored) messages.querySelector("p").textContent = `${value.message_count} previous messages are loaded in the backend. Previous messages are not displayed yet.`;
   status.textContent = restored ? `Session restored · ${value.model}` : "Session ready";
   savedSessions.value = value.id;
+  assistant.render();
 }
 
 function renderRoute() {
@@ -120,6 +125,7 @@ function renderRoute() {
   settingsButton.hidden = !inWorkspace;
   switchProjectButton.hidden = !inWorkspace;
   if (inWorkspace) activeProjectPath.textContent = appState.activeProject.path;
+  assistant.render();
 }
 
 function projectName(path) {
@@ -376,6 +382,7 @@ saveSettingsButton.addEventListener("click", async () => {
     settingsDialog.close();
     const modelEnvelope = await refreshModels(activeProject.id);
     renderModels(providersFrom(modelEnvelope));
+    await assistant.refresh();
   } catch (error) {
     settingsStatus.textContent = "Save failed";
     showError(error);
@@ -439,6 +446,7 @@ async function loadCapabilities() {
 }
 
 async function openProject(path) {
+  if (busy) return;
   appState = beginProjectOpen(appState);
   pathInput.value = path;
   launcherFeedback.textContent = "Opening project and loading its configuration…";
@@ -452,6 +460,7 @@ async function openProject(path) {
     });
     const project = eventPayload(envelope, "project_opened");
     activeProject = project;
+    assistant.reset();
     logStep("project opened", `${project.id}: ${project.path}`);
     createSessionButton.disabled = false;
     activeSession = undefined;
@@ -481,6 +490,7 @@ async function openProject(path) {
       status.textContent = `Open: ${project.id}`;
     }
     await refreshSessions();
+    await assistant.refresh();
     if (activeSession) savedSessions.value = activeSession.id;
     const item = document.createElement("article");
     item.className = "message assistant";
@@ -496,6 +506,7 @@ async function openProject(path) {
     appState = failProjectOpen(appState);
     activeProject = undefined;
     activeSession = undefined;
+    assistant.reset();
     pendingRestoredSession = undefined;
     createSessionButton.disabled = true;
     projectSessions = [];
@@ -540,6 +551,7 @@ createSessionButton.addEventListener("click", async () => {
     const created = eventPayload(envelope, "session_created");
     activateSession(created);
     await refreshSessions();
+    await assistant.refresh();
     savedSessions.value = created.id;
     renderSavedSessions();
     const startupEnvelope = await execute({ type: "get_startup_state" });
@@ -593,6 +605,9 @@ deleteSavedButton.addEventListener("click", async () => {
       promptInput.disabled = true;
       sendButton.disabled = true;
       resetConversation();
+      assistant.render();
+      assistant.clearDocument();
+      promptInput.value = "";
     }
     await refreshSessions();
     const startupEnvelope = await execute({ type: "get_startup_state" });
@@ -608,9 +623,12 @@ deleteSavedButton.addEventListener("click", async () => {
 });
 
 switchProjectButton.addEventListener("click", async () => {
+  if (busy) return;
   appState = returnToLauncher(appState);
   activeProject = undefined;
   activeSession = undefined;
+  assistant.reset();
+  promptInput.value = "";
   pendingRestoredSession = undefined;
   usedToolNames.clear();
   availableProviders = [];
@@ -632,7 +650,12 @@ switchProjectButton.addEventListener("click", async () => {
 
 for (const mode of document.querySelectorAll(".mode-card")) {
   mode.addEventListener("click", () => {
-    if (mode.dataset.mode === "chatbot") {
+    if (mode.dataset.mode === "chatbot" || mode.dataset.mode === "assistant") {
+      selectedMode = mode.dataset.mode;
+      assistant.setMode(selectedMode);
+      for (const card of document.querySelectorAll(".mode-card")) card.classList.toggle("active", card === mode);
+      document.querySelector(".launch-project .eyebrow").textContent = `${selectedMode.toUpperCase()} SETUP`;
+      launcherFeedback.textContent = selectedMode === "assistant" ? "Select a project to open the Assistant workspace." : "Select a project to chat.";
       pathInput.focus();
       return;
     }
@@ -649,6 +672,8 @@ composer.addEventListener("submit", async (event) => {
   promptInput.disabled = true;
   sendButton.disabled = true;
   busy = true;
+  switchProjectButton.disabled = true;
+  assistant.render();
   createSessionButton.disabled = true;
   renderSavedSessions();
   setThinking(true);
@@ -656,15 +681,16 @@ composer.addEventListener("submit", async (event) => {
   renderUsedTools();
   toolEvents.replaceChildren();
   startActivityPolling();
-  logStep("send message", `${activeSession.id}: ${prompt}`);
+  logStep("send message", activeSession.id);
   appendUserMessage(prompt);
   messages.scrollTop = messages.scrollHeight;
   try {
     const request = requestId();
-    const envelope = await invoke("send_message", {
+    const envelope = await invoke(selectedMode === "assistant" ? "send_assistant_message" : "send_message", {
       requestId: request,
       sessionId: activeSession.id,
       prompt,
+      ...(selectedMode === "assistant" ? { documentPath: assistant.documentPath() } : {}),
     });
     const response = eventPayload(envelope, "assistant_message");
     const item = document.createElement("article");
@@ -679,11 +705,14 @@ composer.addEventListener("submit", async (event) => {
     // Keep the submitted prompt in the conversation and clear only the draft
     // composer for the next request.
     promptInput.value = "";
+    assistant.clearDocument();
     promptInput.style.height = "auto";
   } catch (error) {
     showError(error);
   } finally {
     busy = false;
+    switchProjectButton.disabled = false;
+    assistant.render();
     createSessionButton.disabled = false;
     await refreshSessions().catch(showError);
     if (activeSession) savedSessions.value = activeSession.id;

@@ -179,8 +179,8 @@ watcher during the initial binary link.
 
 The Tauri window opens the launcher through the local Vite server. In the UI:
 
-1. Select `Chat-bot` on the mode screen. `Assistant`, `AI Tutor`, and `Coder`
-   currently show an explicit planned-feature notice.
+1. Select `Chat-bot` or `Assistant` on the mode screen. `AI Tutor` and `Coder`
+   still show an explicit planned-feature notice.
 2. Choose an available recent project, or click `Choose…` and select a project
    directory.
 3. Click `Open project`. The chat workspace appears only after Rust validates
@@ -214,6 +214,43 @@ The Tauri window opens the launcher through the local Vite server. In the UI:
     confirmation. The CLI retains its read-only default and interactive prompts.
 6. Use `Switch project` to return to the launcher. The active project and
    session selection are cleared, while persisted recent projects remain.
+
+### Assistant workspace
+
+Choose Assistant before opening a project, then create or restore a session.
+Calendar, Mail and Web Search buttons prepare editable requests; pressing Send
+executes them through the read-only Rust agent tool registry. Availability comes
+from the project's enabled tools and connector configuration. Refresh permissions
+after changing settings. A configured client ID is not proof of a valid OAuth
+login or network access: failed calls report an error rather than fabricating
+results. See [mail setup](README.md#работа-с-почтой) for Gmail/Outlook OAuth;
+Google Calendar requires `GOOGLE_CALENDAR_CLIENT_ID` and prior authorization,
+or uses macOS Calendar access on macOS. Web Search defaults to DuckDuckGo; Tavily
+requires `WEB_SEARCH_PROVIDER=tavily` and `WEB_SEARCH_API_KEY`.
+Set `enabled_tools` explicitly in `.aiagent/config.json` to turn off individual
+tools; automatic mail/calendar/macOS defaults apply only when the field is absent.
+For example, removing `list_calendar_events` disables Calendar even on macOS.
+
+Local document selects a file in the configured tool `working_dir` and prepares
+a prompt. On Send, Rust calls `mcp_read_local_file` and sends the extracted text
+to the selected LLM provider. The WebView receives neither raw tool output nor
+the document text. The tool checks canonical paths (including symlinks), allows
+only `toml`, `yml`, `yaml`, `txt`, `json`, `md`, `doc`, `docx`, `pdf`, limits input to
+5 MB and Assistant prompt output to 30 KB; `pdf` requires `pdftotext`, `docx`
+requires `unzip`, and `doc` requires `textutil`. Do not select a confidential
+document unless you trust your configured LLM provider. Session history contains
+the submitted document text; the global launcher state does not. Cloud document
+access, recognition, conversion, one-click summary and feedback are disabled
+placeholders, not working connectors.
+
+Manage prompts stores up to 20 named project-local presets in versioned
+`.aiagent/assistant-prompts.json`. Presets are editable instructions, not
+independent subagents and never grant tools. An invalid or unknown-version
+document is preserved and must be fixed explicitly. Assistant's allowlist
+removes all file-write, process, Git mutation and mail-send tools, even when
+Chat-bot in the same session permits writes; changing modes reloads the latest
+checkpoint. The web search tool can contact external services; do not include
+private data in search queries.
 
 The RAG block is a disabled design placeholder; this stage does not index or
 send project content to a retrieval service. Missing recent project paths are
