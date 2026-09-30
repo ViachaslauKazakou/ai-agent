@@ -224,7 +224,8 @@ pub struct ProviderDto {
     pub reachable: bool,
 }
 
-/// Configuration documents exposed to the desktop settings editor.
+/// Sensitive configuration documents exposed only to the trusted local settings editor.
+/// Unlike ordinary application events, these may contain provider and connector secrets.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettingsDocuments {
     /// Project behavior, access, and connector settings.
@@ -1516,7 +1517,8 @@ impl ApplicationService {
         Ok(())
     }
 
-    /// Reads both project-local settings documents for the settings dialog.
+    /// Reads both project-local settings documents for the trusted settings dialog.
+    /// This explicitly transfers raw secrets over local Tauri IPC to the WebView.
     pub fn read_settings(&self, project_id: &str) -> Result<SettingsDocuments, AppError> {
         let project = self
             .projects

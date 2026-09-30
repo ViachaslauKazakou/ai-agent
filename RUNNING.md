@@ -312,7 +312,7 @@ make desktop-build
 Artifacts are generated under:
 
 ```text
-src-tauri/target/release/bundle/
+target/release/bundle/
 ```
 
 Install a local `via-agent` launcher:
@@ -321,6 +321,16 @@ Install a local `via-agent` launcher:
 make desktop-install
 via-agent
 ```
+
+The launcher executes the current Cargo workspace build from
+`target/release/bundle/macos/via-agent.app` on macOS. If you installed it
+before this path was corrected, rerun `make desktop-install` to replace the
+old launcher. Open the `.app` in that directory to launch the packaged GUI
+directly; the DMG is under `target/release/bundle/dmg/`.
+
+Locally built macOS bundles are not Developer ID signed or notarized by
+default. For distribution to another Mac, configure signing and notarization
+before shipping the DMG; Gatekeeper may reject an unsigned downloaded app.
 
 Open an existing project directly, or choose one from the launcher:
 
