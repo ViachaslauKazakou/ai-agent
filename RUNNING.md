@@ -93,6 +93,21 @@ Run from the repository during development:
 cargo run -- --working-dir /path/to/project
 ```
 
+For interactive `ai-agent` without a directory argument or
+`AI_AGENT_PROJECT_DIR`, subsequent launches offer available recent projects,
+most recently opened first, plus the current directory. Use arrow keys and
+Enter to select; Esc keeps the current directory. The first launch behaves as
+before. Explicit `--project-dir`/`--working-dir`, one-shot prompts, `--init`,
+OAuth login and scheduler skip the picker. After selecting a project, the CLI
+still asks separately whether to load its legacy
+`<working-dir>/.aiagent/session.json` (default: no). CLI history remains
+separate from Desktop's `.aiagent/sessions/` histories.
+
+Successful CLI opens record project metadata in `~/.ai-agent/state.json`,
+shared with the Desktop launcher; no messages or credentials are recorded.
+Missing recent directories are not offered. A corrupt/incompatible state file
+is reported but preserved; explicit CLI paths continue to work.
+
 Run a single prompt:
 
 ```bash

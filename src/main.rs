@@ -2,14 +2,16 @@
 
 use std::{
     io::Write,
+    path::Path,
     time::{Duration, Instant},
 };
 
 use ai_agent::cli::{Cli, ReplCommand, help_text, parse_repl_command};
 use ai_agent::{
-    Config, LiteLlmProvider, LlmProvider, ModelInfo, OllamaProvider, Session,
+    Config, LaunchStateStore, LiteLlmProvider, LlmProvider, ModelInfo, OllamaProvider, Session,
     agent::Agent,
     agents::{AgentCatalog, AgentProfile},
+    cli_startup::{project_choices, should_offer_projects},
     index::ProjectIndex,
     tools::{ToolContext, registry_from_names},
 };
@@ -20,12 +22,51 @@ use rustyline::{DefaultEditor, error::ReadlineError};
 
 #[tokio::main]
 async fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
     if cli.mcp_server {
         if let Err(error) = ai_agent::mcp::run_server().await {
             eprintln!("MCP server error: {error}");
         }
         return;
+    }
+    // Explicit project/non-interactive modes must not depend on user-scoped
+    // metadata. A damaged state file is never overwritten by this adapter.
+    let state_store = match LaunchStateStore::in_user_home() {
+        Ok(store) => Some(store),
+        Err(error) => {
+            eprintln!("Предупреждение: состояние запуска недоступно: {error}");
+            None
+        }
+    };
+    if should_offer_projects(&cli, std::env::var_os("AI_AGENT_PROJECT_DIR").is_some())
+        && let Some(store) = &state_store
+    {
+        match store.load() {
+            Ok(state) => {
+                if let Ok(current) = std::env::current_dir().and_then(|path| path.canonicalize()) {
+                    let choices = project_choices(&state, &current);
+                    if choices.len() > 1 {
+                        let labels = choices
+                            .iter()
+                            .map(|choice| choice.label.as_str())
+                            .collect::<Vec<_>>();
+                        match Select::new()
+                            .with_prompt("Выберите проект (Esc — текущий каталог)")
+                            .items(&labels)
+                            .default(0)
+                            .interact_opt()
+                        {
+                            Ok(Some(index)) => cli.project_dir = Some(choices[index].path.clone()),
+                            Ok(None) => {}
+                            Err(error) => {
+                                eprintln!("Предупреждение: выбор проекта недоступен: {error}")
+                            }
+                        }
+                    }
+                }
+            }
+            Err(error) => eprintln!("Предупреждение: состояние запуска не прочитано: {error}"),
+        }
     }
     let config = match Config::load(&cli) {
         Ok(config) => config,
@@ -34,6 +75,14 @@ async fn main() {
             return;
         }
     };
+
+    // Record only a successfully loaded project, not a failed attempt or a
+    // metadata-only discovery. Never overwrite corrupt user state.
+    if let Some(store) = &state_store
+        && let Err(error) = record_cli_project(store, &config.project_dir)
+    {
+        eprintln!("Предупреждение: проект не записан в недавние: {error}");
+    }
 
     if cli.init {
         println!("Проект инициализирован: {}", config.working_dir.display());
@@ -96,14 +145,16 @@ async fn main() {
         }
     };
     let saved_session = session_path(&session);
-    if saved_session.is_file()
+    if cli.prompt.is_none()
+        && !cli.scheduler
+        && saved_session.is_file()
         && Confirm::new()
             .with_prompt("Загрузить существующую сессию?")
             .default(false)
             .interact()
             .unwrap_or(false)
     {
-        match Session::load_from(&saved_session) {
+        match load_legacy_session(&saved_session, &config.working_dir) {
             Ok(loaded) => {
                 session = loaded;
                 println!("Существующая сессия загружена.");
@@ -191,6 +242,39 @@ async fn main() {
     } else {
         run_repl(&mut session, provider, &config, catalog, active_profile).await;
     }
+}
+
+/// A legacy CLI history is bound to its original tools directory, regardless
+/// of which project configuration is currently selected.
+fn load_legacy_session(path: &Path, working_dir: &Path) -> Result<Session, ai_agent::AppError> {
+    let session = Session::load_from(path)?;
+    let original = session.working_dir().canonicalize().map_err(|error| {
+        ai_agent::AppError::SessionPersistence(format!("каталог сессии недоступен: {error}"))
+    })?;
+    if original != working_dir {
+        return Err(ai_agent::AppError::SessionPersistence(
+            "сессия принадлежит другому рабочему каталогу".to_owned(),
+        ));
+    }
+    Ok(session)
+}
+
+fn record_cli_project(
+    store: &LaunchStateStore,
+    project_dir: &Path,
+) -> Result<(), ai_agent::AppError> {
+    let canonical = project_dir
+        .canonicalize()
+        .map_err(|error| ai_agent::AppError::LaunchState(format!("проект недоступен: {error}")))?;
+    if !canonical.is_dir() {
+        return Err(ai_agent::AppError::LaunchState(
+            "проект не является каталогом".to_owned(),
+        ));
+    }
+    let mut state = store.load()?;
+    state.record_launch(chrono::Utc::now());
+    state.record_project(canonical, chrono::Utc::now());
+    store.save(&state)
 }
 
 async fn select_model(
@@ -535,13 +619,15 @@ async fn run_repl(
                 Ok(()) => println!("Сессия сохранена."),
                 Err(error) => println!("Ошибка сохранения: {error}"),
             },
-            ReplCommand::Load => match Session::load_from(session_path(session)) {
-                Ok(loaded) => {
-                    *session = loaded;
-                    println!("Сессия загружена.");
+            ReplCommand::Load => {
+                match load_legacy_session(&session_path(session), &config.working_dir) {
+                    Ok(loaded) => {
+                        *session = loaded;
+                        println!("Сессия загружена.");
+                    }
+                    Err(error) => println!("Ошибка загрузки: {error}"),
                 }
-                Err(error) => println!("Ошибка загрузки: {error}"),
-            },
+            }
             ReplCommand::Index(argument) => {
                 let path = ProjectIndex::index_path(session.working_dir());
                 if argument.as_deref() == Some("status") {
@@ -1259,7 +1345,9 @@ fn is_coding_request(prompt: &str) -> bool {
 
 #[cfg(test)]
 mod summary_tests {
-    use super::is_coding_request;
+    use super::{is_coding_request, load_legacy_session, record_cli_project};
+    use ai_agent::{LaunchStateStore, Session};
+    use uuid::Uuid;
 
     #[test]
     fn only_coding_requests_get_summary() {
@@ -1267,6 +1355,45 @@ mod summary_tests {
         assert!(is_coding_request("create file src/app.py"));
         assert!(!is_coding_request("проверь почту за сегодня"));
         assert!(!is_coding_request("какая погода?"));
+    }
+
+    #[test]
+    fn legacy_session_rejects_different_tools_directory() {
+        let root = std::env::temp_dir().join(format!("cli-history-{}", Uuid::new_v4()));
+        let first = root.join("first");
+        let second = root.join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let history = first.join("session.json");
+        let session = Session::new(&first, "model").unwrap();
+        session.save_to(&history).unwrap();
+        assert_eq!(
+            load_legacy_session(&history, &first.canonicalize().unwrap())
+                .unwrap()
+                .id(),
+            session.id()
+        );
+        assert!(load_legacy_session(&history, &second.canonicalize().unwrap()).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn successful_open_records_launch_and_preserves_corrupt_state() {
+        let root = std::env::temp_dir().join(format!("cli-state-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let path = root.join("user/state.json");
+        let store = LaunchStateStore::new(&path);
+        record_cli_project(&store, &project).unwrap();
+        let first = store.load().unwrap();
+        assert!(first.last_started_at.is_some());
+        assert_eq!(first.projects[0].path, project.canonicalize().unwrap());
+        record_cli_project(&store, &project).unwrap();
+        assert_eq!(store.load().unwrap().projects[0].id, first.projects[0].id);
+        std::fs::write(&path, "{invalid").unwrap();
+        assert!(record_cli_project(&store, &project).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{invalid");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 

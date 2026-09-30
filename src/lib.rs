@@ -9,6 +9,7 @@ pub mod agents;
 pub mod application;
 pub mod ci;
 pub mod cli;
+pub mod cli_startup;
 pub mod config;
 pub mod connectors;
 pub mod domain;
