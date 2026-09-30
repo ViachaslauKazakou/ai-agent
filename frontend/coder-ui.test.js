@@ -74,3 +74,20 @@ test("late diff from earlier staged source cannot replace newer diff", async () 
     assert.equal(state.get("#coder-diff").textContent, "staged");
   } finally { state.restore(); }
 });
+
+test("non-Git project still shows tree and environment but disables Git check", async () => {
+  const state = fixture(async (command) => {
+    if (command === "coder_changes") throw new Error("no local .git");
+    return ({ coder_tree: { files: [{ path: "code.rs", directory: false }], truncated: false },
+      coder_venv: { present: false, interpreter: null, note: "Inspection only" } })[command];
+  });
+  try {
+    state.ui.setMode("coder");
+    await state.ui.refresh();
+    assert.equal(state.get("#coder-tree").children[0].textContent, "· code.rs");
+    assert.match(state.get("#coder-changes").textContent, /Git changes unavailable/);
+    assert.match(state.get("#coder-status").textContent, /Partial inspection/);
+    assert.equal(state.get("#coder-check").disabled, true);
+    assert.match(state.get("#coder-venv").textContent, /No .venv/);
+  } finally { state.restore(); }
+});

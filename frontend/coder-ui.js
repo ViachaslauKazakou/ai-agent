@@ -13,15 +13,17 @@ export function createCoderUI({ invoke, getProject }) {
   let selected;
   let diffRevision = 0;
   let busy = false;
+  let gitAvailable = false;
   function render() {
     panel.hidden = mode !== "coder" || !getProject();
     refreshButton.disabled = busy;
-    checkButton.disabled = busy || !getProject();
+    checkButton.disabled = busy || !getProject() || !gitAvailable;
   }
   function reset() {
     revision++;
     diffRevision++;
     busy = false;
+    gitAvailable = false;
     selected = undefined;
     tree.replaceChildren();
     changes.replaceChildren();
@@ -54,7 +56,7 @@ export function createCoderUI({ invoke, getProject }) {
     render();
     status.textContent = "Loading project inspection…";
     try {
-      const [files, changed, environment] = await Promise.all([
+      const [files, changed, environment] = await Promise.allSettled([
         invoke("coder_tree", { projectId: project.id }),
         invoke("coder_changes", { projectId: project.id }),
         invoke("coder_venv", { projectId: project.id }),
@@ -62,33 +64,42 @@ export function createCoderUI({ invoke, getProject }) {
       if (current !== revision || getProject()?.id !== project.id) return;
       tree.replaceChildren();
       changes.replaceChildren();
-      for (const file of files.files) {
-        const line = document.createElement("div");
-        line.textContent = `${file.directory ? "▸" : "·"} ${file.path}`;
-        tree.append(line);
+      gitAvailable = changed.status === "fulfilled";
+      if (files.status === "fulfilled") {
+        for (const file of files.value.files) {
+          const line = document.createElement("div");
+          line.textContent = `${file.directory ? "▸" : "·"} ${file.path}`;
+          tree.append(line);
+        }
+        if (!files.value.files.length) tree.textContent = "No visible files";
+      } else {
+        tree.textContent = `Files unavailable: ${String(files.reason)}`;
       }
-      if (!files.files.length) tree.textContent = "No visible files";
-      for (const change of changed) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = `${change.status}  ${change.path}`;
-        button.addEventListener("click", () => loadDiff(change.path));
-        changes.append(button);
+      if (gitAvailable) {
+        for (const change of changed.value) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = `${change.status}  ${change.path}`;
+          button.addEventListener("click", () => loadDiff(change.path));
+          changes.append(button);
+        }
+        if (!changed.value.length) changes.textContent = "No visible changes";
+      } else {
+        changes.textContent = `Git changes unavailable: ${String(changed.reason)}`;
       }
-      if (!changed.length) changes.textContent = "No visible changes";
-      venv.textContent = `${environment.present ? ".venv present" : "No .venv"}${environment.interpreter ? ` · ${environment.interpreter}` : ""}. ${environment.note}`;
+      venv.textContent = environment.status === "fulfilled"
+        ? `${environment.value.present ? ".venv present" : "No .venv"}${environment.value.interpreter ? ` · ${environment.value.interpreter}` : ""}. ${environment.value.note}`
+        : `Environment unavailable: ${String(environment.reason)}`;
       selected = undefined;
       diff.textContent = "Select a changed file to view its diff.";
-      status.textContent = `Ready · ${files.files.length} entries${files.truncated ? " (tree truncated)" : ""} · ${changed.length} changes`;
-    } catch (error) {
-      if (current === revision && getProject()?.id === project.id) status.textContent = `Coder inspection unavailable: ${String(error)}`;
+      status.textContent = `${files.status === "fulfilled" && gitAvailable && environment.status === "fulfilled" ? "Ready" : "Partial inspection"} · ${files.status === "fulfilled" ? `${files.value.files.length} entries${files.value.truncated ? " (tree truncated)" : ""}` : "files unavailable"} · ${gitAvailable ? `${changed.value.length} changes` : "Git unavailable"}`;
     } finally {
       if (current === revision) { busy = false; render(); }
     }
   }
   async function check() {
     const project = getProject();
-    if (!project || busy) return;
+    if (!project || busy || !gitAvailable) return;
     const current = revision;
     busy = true;
     render();

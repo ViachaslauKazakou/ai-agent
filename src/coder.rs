@@ -441,17 +441,19 @@ fn safe_entry(root: &Path, relative: &Path, may_be_missing: bool) -> Result<bool
 
 /// Lists ordinary entries without following links, including a depth and count limit.
 pub fn tree(root: &Path) -> Result<CoderTreeDto, AppError> {
+    let root = project_dir(root)?;
     let mut result = CoderTreeDto {
         files: Vec::new(),
         truncated: false,
     };
-    let mut pending = vec![(PathBuf::new(), 0)];
-    while let Some((relative, depth)) = pending.pop() {
-        let mut entries = fs::read_dir(root.join(&relative))
-            .map_err(|error| deny(&error.to_string()))?
+    let mut pending = vec![(root, PathBuf::new(), 0)];
+    while let Some((dir, relative, depth)) = pending.pop() {
+        let mut entries = dir
+            .entries()
+            .map_err(io_error)?
             .take(MAX_ENTRIES + 1)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| deny(&error.to_string()))?;
+            .map_err(io_error)?;
         entries.sort_by_key(|entry| entry.file_name());
         if entries.len() > MAX_ENTRIES {
             result.truncated = true;
@@ -463,12 +465,29 @@ pub fn tree(root: &Path) -> Result<CoderTreeDto, AppError> {
             if !allowed_component(name) {
                 continue;
             }
-            let kind = entry
-                .file_type()
-                .map_err(|error| deny(&error.to_string()))?;
+            let kind = entry.file_type().map_err(io_error)?;
             if kind.is_symlink() || (!kind.is_file() && !kind.is_dir()) {
                 continue;
             }
+            // A directory can be replaced by a link after enumeration. Only
+            // descend through a handle after checking the opened directory.
+            let child = if kind.is_dir() && depth < MAX_DEPTH {
+                let before = dir.symlink_metadata(name).map_err(io_error)?;
+                if !before.is_dir() || before.file_type().is_symlink() {
+                    continue;
+                }
+                let opened = entry.open_dir().map_err(io_error)?;
+                #[cfg(unix)]
+                {
+                    let after = opened.dir_metadata().map_err(io_error)?;
+                    if before.dev() != after.dev() || before.ino() != after.ino() {
+                        continue;
+                    }
+                }
+                Some(opened)
+            } else {
+                None
+            };
             if result.files.len() >= MAX_ENTRIES {
                 result.truncated = true;
                 return Ok(result);
@@ -479,8 +498,8 @@ pub fn tree(root: &Path) -> Result<CoderTreeDto, AppError> {
                 directory: kind.is_dir(),
             });
             if kind.is_dir() {
-                if depth < MAX_DEPTH {
-                    pending.push((path, depth + 1));
+                if let Some(child) = child {
+                    pending.push((child, path, depth + 1));
                 } else {
                     result.truncated = true;
                 }
@@ -618,12 +637,16 @@ pub async fn changes(root: &Path) -> Result<Vec<CoderChangeDto>, AppError> {
 /// Returns a bounded tracked-file diff; untracked files have no Git diff.
 pub async fn diff(root: &Path, raw: &str, staged: bool) -> Result<CoderDiffDto, AppError> {
     let relative = safe_relative(raw)?;
-    if !safe_entry(root, &relative, true)?
-        && !changes(root)
-            .await?
-            .iter()
-            .any(|entry| entry.path == raw && entry.status.contains('D'))
-    {
+    let change = changes(root)
+        .await?
+        .into_iter()
+        .find(|entry| entry.path == raw && entry.status != "??")
+        .ok_or_else(|| deny("file has no visible tracked changes"))?;
+    if safe_entry(root, &relative, true)? {
+        let (dir, name) = parent_dir(&project_dir(root)?, &relative)?;
+        let meta = dir.symlink_metadata(&name).map_err(io_error)?;
+        ordinary_file(&meta)?;
+    } else if !change.status.contains('D') {
         return Err(deny("file is not present in this project"));
     }
     let args = if staged {
@@ -807,6 +830,25 @@ mod tests {
         )
         .unwrap();
         assert!(diff(&fixture.0, "code.rs", false).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn diff_does_not_read_unchanged_or_untracked_paths() {
+        let fixture = Fixture::new();
+        fixture.git(&["init", "-q"]);
+        fs::write(fixture.0.join("tracked.txt"), "visible\n").unwrap();
+        fixture.git(&["add", "tracked.txt"]);
+        fs::write(fixture.0.join("untracked.txt"), "private\n").unwrap();
+        assert!(diff(&fixture.0, "tracked.txt", true).await.is_ok());
+        assert!(diff(&fixture.0, "tracked.txt", false).await.is_ok());
+        assert!(diff(&fixture.0, "untracked.txt", false).await.is_err());
+        assert!(diff(&fixture.0, "untracked.txt", true).await.is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("tracked.txt", fixture.0.join("linked.txt")).unwrap();
+            fixture.git(&["add", "linked.txt"]);
+            assert!(diff(&fixture.0, "linked.txt", true).await.is_err());
+        }
     }
 
     #[tokio::test]
