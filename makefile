@@ -1,5 +1,6 @@
 PROJECT_DIR := .
 ROOT_DIR := $(abspath $(PROJECT_DIR))
+RELEASE_DIR := $(ROOT_DIR)/target/release
 MANIFEST := Cargo.toml
 BINARY := ai-agent
 INSTALL_DIR := $(HOME)/.cargo/bin
@@ -57,10 +58,10 @@ desktop-install: desktop-build
 	@mkdir -p $(INSTALL_DIR)
 	@case "$$(uname -s)" in \
 		Darwin) \
-			printf '%s\n' '#!/bin/sh' 'exec "$(ROOT_DIR)/src-tauri/target/release/bundle/macos/via-agent.app/Contents/MacOS/via-agent" "$$@"' > "$(INSTALL_DIR)/via-agent"; \
+			printf '%s\n' '#!/bin/sh' 'exec "$(RELEASE_DIR)/bundle/macos/via-agent.app/Contents/MacOS/via-agent" "$$@"' > "$(INSTALL_DIR)/via-agent"; \
 			;; \
 		*) \
-			printf '%s\n' '#!/bin/sh' 'exec "$(ROOT_DIR)/src-tauri/target/release/via-agent" "$$@"' > "$(INSTALL_DIR)/via-agent"; \
+			printf '%s\n' '#!/bin/sh' 'exec "$(RELEASE_DIR)/via-agent" "$$@"' > "$(INSTALL_DIR)/via-agent"; \
 			;; \
 	esac
 	@chmod +x $(INSTALL_DIR)/via-agent

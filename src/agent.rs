@@ -95,6 +95,15 @@ impl<P: LlmProvider> Agent<P> {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn permission_snapshot(&self) -> (Vec<String>, bool, bool) {
+        (
+            self.registry.names(),
+            self.context.allow_write,
+            self.context.auto_approve_patch,
+        )
+    }
+
     pub fn with_system_prompt(mut self, system_prompt: String) -> Self {
         self.system_prompt = Some(system_prompt);
         self
@@ -113,6 +122,13 @@ impl<P: LlmProvider> Agent<P> {
     ) -> Self {
         self.max_elapsed = max_elapsed;
         self.max_diff_bytes = max_diff_bytes;
+        self
+    }
+
+    /// Lets a request continue past the profile's round count; the elapsed-time
+    /// limit and individual tool/permission checks still apply.
+    pub fn without_tool_round_limit(mut self) -> Self {
+        self.max_tool_rounds = 0;
         self
     }
 
@@ -174,7 +190,11 @@ impl<P: LlmProvider> Agent<P> {
         let mut tool_parse_retries = 0;
         let mut last_mail_result: Option<String> = None;
         let mut last_calendar_result: Option<String> = None;
-        for round in 0..self.max_tool_rounds {
+        let mut round = 0;
+        loop {
+            if self.max_tool_rounds != 0 && round >= self.max_tool_rounds {
+                return Err(AppError::ToolRoundLimit(self.max_tool_rounds));
+            }
             if let Some(limit) = self.max_elapsed
                 && started.elapsed() > limit
             {
@@ -377,9 +397,10 @@ impl<P: LlmProvider> Agent<P> {
                     }
                 }
             }
+            round = round
+                .checked_add(1)
+                .ok_or(AppError::ToolRoundLimit(usize::MAX))?;
         }
-
-        Err(AppError::ToolRoundLimit(self.max_tool_rounds))
     }
 }
 
@@ -505,6 +526,88 @@ mod tests {
                 .iter()
                 .any(|message| message.content() == "Готово")
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    struct ManyToolRounds {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LlmProvider for ManyToolRounds {
+        async fn complete(
+            &self,
+            _request: CompletionRequest,
+        ) -> Result<CompletionResponse, AppError> {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(CompletionResponse {
+                message: if call < 21 {
+                    LlmMessage {
+                        role: "assistant".into(),
+                        content: None,
+                        tool_calls: Some(vec![ToolCall {
+                            id: format!("call-{call}"),
+                            kind: "function".into(),
+                            function: FunctionCall {
+                                name: "list_directory".into(),
+                                arguments: "{\"path\":\".\"}".into(),
+                            },
+                        }]),
+                        tool_call_id: None,
+                    }
+                } else {
+                    LlmMessage {
+                        role: "assistant".into(),
+                        content: Some("Готово после 21 вызова".into()),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    }
+                },
+                finish_reason: None,
+                usage: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn desktop_can_continue_past_twenty_tool_rounds() {
+        let root = std::env::temp_dir().join(format!("agent-many-rounds-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut agent = Agent::new(
+            ManyToolRounds {
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            },
+            crate::tools::default_registry().unwrap(),
+            ToolContext::new(&root, false),
+            20,
+        )
+        .without_tool_round_limit()
+        .with_loop_limits(Some(Duration::from_secs(60)), 100_000);
+        let mut session = Session::new(&root, "local").unwrap();
+        let response = agent.complete(&mut session, "Проверь файлы").await.unwrap();
+        assert_eq!(response.tool_rounds, 21);
+        assert_eq!(response.summary.tool_calls, 21);
+        assert_eq!(response.content, "Готово после 21 вызова");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_tool_round_limit_is_still_honored() {
+        let root = std::env::temp_dir().join(format!("agent-round-limit-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut agent = Agent::new(
+            ManyToolRounds {
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            },
+            crate::tools::default_registry().unwrap(),
+            ToolContext::new(&root, false),
+            2,
+        );
+        let mut session = Session::new(&root, "local").unwrap();
+        assert!(matches!(
+            agent.complete(&mut session, "Проверь файлы").await,
+            Err(AppError::ToolRoundLimit(2))
+        ));
         std::fs::remove_dir_all(root).unwrap();
     }
 

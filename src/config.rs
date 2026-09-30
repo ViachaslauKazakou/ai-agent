@@ -138,6 +138,8 @@ pub struct Config {
     /// Имя модели.
     pub model: String,
     pub reasoning_effort: String,
+    /// Canonical root owning `.aiagent` configuration files.
+    pub project_dir: PathBuf,
     /// Абсолютная существующая рабочая директория.
     pub working_dir: PathBuf,
     /// Лимит будущих раундов инструментов.
@@ -179,6 +181,7 @@ impl fmt::Debug for Config {
             .field("providers", &self.providers.names().collect::<Vec<_>>())
             .field("model", &self.model)
             .field("reasoning_effort", &self.reasoning_effort)
+            .field("project_dir", &self.project_dir)
             .field("working_dir", &self.working_dir)
             .field("max_tool_rounds", &self.max_tool_rounds)
             .field("request_timeout_secs", &self.request_timeout_secs)
@@ -205,8 +208,13 @@ impl Config {
 
     /// Validates and atomically writes a project JSON document.
     pub fn write_project_config_json(project_dir: &Path, content: &str) -> Result<(), AppError> {
-        let config: JsonConfig = serde_json::from_str(content)
-            .map_err(|error| AppError::AgentConfig(format!("config.json: {error}")))?;
+        let config: JsonConfig = serde_json::from_str(content).map_err(|error| {
+            AppError::AgentConfig(format!(
+                "config.json: invalid JSON or field type at line {} column {}",
+                error.line(),
+                error.column()
+            ))
+        })?;
         let data = serde_json::to_vec_pretty(&config)
             .map_err(|error| AppError::AgentConfig(error.to_string()))?;
         atomic_write(&project_dir.join(PROJECT_CONFIG_PATH), &data)
@@ -220,8 +228,13 @@ impl Config {
 
     /// Validates and atomically writes the provider registry document.
     pub fn write_provider_config_json(project_dir: &Path, content: &str) -> Result<(), AppError> {
-        let providers: ProviderRegistry = serde_json::from_str(content)
-            .map_err(|error| AppError::AgentConfig(format!("providers.json: {error}")))?;
+        let providers: ProviderRegistry = serde_json::from_str(content).map_err(|error| {
+            AppError::AgentConfig(format!(
+                "providers.json: invalid JSON or field type at line {} column {}",
+                error.line(),
+                error.column()
+            ))
+        })?;
         let data = serde_json::to_vec_pretty(&providers)
             .map_err(|error| AppError::AgentConfig(error.to_string()))?;
         atomic_write(&project_dir.join(PROVIDERS_CONFIG_PATH), &data)
@@ -236,6 +249,7 @@ impl Config {
             "model": self.model,
             "reasoning_effort": self.reasoning_effort,
             "working_dir": self.working_dir,
+            "project_dir": self.project_dir,
             "max_tool_rounds": self.max_tool_rounds,
             "request_timeout_secs": self.request_timeout_secs,
             "log_level": self.log_level,
@@ -356,9 +370,19 @@ impl Config {
             };
         let mut cli = cli.clone();
         if cli.working_dir.is_none() && !environment.contains_key("WORKING_DIR") {
-            cli.working_dir = Some(project_dir);
+            cli.working_dir = Some(project_dir.clone());
         }
-        Self::from_sources_with_file(&cli, &environment, file, providers)
+        // Project JSON and environment variables can hold credentials. Keep
+        // validation errors from echoing their original values to callers.
+        let mut result = Self::from_sources_with_file(&cli, &environment, file, providers)
+            .map_err(|error| match error {
+                AppError::InvalidEnvironmentValue { name, .. } => {
+                    AppError::InvalidConfig(format!("некорректное значение параметра {name}"))
+                }
+                other => other,
+            })?;
+        result.project_dir = project_dir;
+        Ok(result)
     }
 
     pub fn save_model(&self, model: &str) -> Result<(), AppError> {
@@ -368,11 +392,11 @@ impl Config {
     /// Persists the active provider and model while leaving provider secrets in
     /// the separate providers registry.
     pub fn save_selection(&self, provider: &str, model: &str) -> Result<(), AppError> {
-        persist_selection(&self.working_dir, provider, model)
+        persist_selection(&self.project_dir, provider, model)
     }
 
     pub fn save_reasoning_effort(&self, effort: &str) -> Result<(), AppError> {
-        persist_reasoning_effort(&self.working_dir, effort)
+        persist_reasoning_effort(&self.project_dir, effort)
     }
 
     /// Собирает конфигурацию из defaults, переданного окружения и CLI.
@@ -440,7 +464,7 @@ impl Config {
             );
         }
         let provider_config = providers.provider(&provider).ok_or_else(|| {
-            AppError::InvalidConfig(format!("провайдер не найден в providers.json: {provider}"))
+            AppError::InvalidConfig("провайдер не найден в providers.json".to_owned())
         })?;
         let base_url = cli
             .base_url
@@ -531,11 +555,13 @@ impl Config {
         }
 
         let allow_write = cli.allow_write || file_agent.allow_write.unwrap_or(false);
+        let explicit_tools = file_agent.enabled_tools.is_some();
         let enabled_tools = file_agent.enabled_tools.unwrap_or_else(|| {
             vec![
                 "read_file".to_owned(),
                 "list_directory".to_owned(),
                 "write_file".to_owned(),
+                "create_file".to_owned(),
                 "apply_patch".to_owned(),
                 "rollback_last_change".to_owned(),
                 "search_files".to_owned(),
@@ -561,7 +587,8 @@ impl Config {
         let web_search_endpoint = environment.get("WEB_SEARCH_ENDPOINT").cloned();
         let web_search_api_key = environment.get("WEB_SEARCH_API_KEY").cloned();
         let mut enabled_tools = enabled_tools;
-        if (google_gmail_client_id.is_some() || microsoft_graph_client_id.is_some())
+        if !explicit_tools
+            && (google_gmail_client_id.is_some() || microsoft_graph_client_id.is_some())
             && !enabled_tools
                 .iter()
                 .any(|tool| tool == "list_recent_emails")
@@ -572,14 +599,15 @@ impl Config {
                 "search_emails".to_owned(),
             ]);
         }
-        if (google_calendar_client_id.is_some() || cfg!(target_os = "macos"))
+        if !explicit_tools
+            && (google_calendar_client_id.is_some() || cfg!(target_os = "macos"))
             && !enabled_tools
                 .iter()
                 .any(|tool| tool == "list_calendar_events")
         {
             enabled_tools.push("list_calendar_events".to_owned());
         }
-        if cfg!(target_os = "macos") {
+        if !explicit_tools && cfg!(target_os = "macos") {
             for tool in ["mcp_read_local_file", "mcp_web_search"] {
                 if !enabled_tools.iter().any(|enabled| enabled == tool) {
                     enabled_tools.push(tool.to_owned());
@@ -600,6 +628,7 @@ impl Config {
             api_key,
             model,
             reasoning_effort,
+            project_dir: resolved_working_dir.clone(),
             working_dir: resolved_working_dir,
             max_tool_rounds,
             request_timeout_secs,
@@ -840,17 +869,22 @@ pub fn normalize_reasoning_effort(value: &str) -> Result<String, AppError> {
     let normalized = value.trim().to_ascii_lowercase();
     match normalized.as_str() {
         "none" | "low" | "medium" | "high" => Ok(normalized),
-        _ => Err(AppError::InvalidConfig(format!(
-            "недопустимый reasoning_effort: {value}; используйте none, low, medium или high"
-        ))),
+        _ => Err(AppError::InvalidConfig(
+            "недопустимый reasoning_effort; используйте none, low, medium или high".to_owned(),
+        )),
     }
 }
 
 fn load_json_config(path: &Path) -> Result<Option<JsonConfig>, AppError> {
     match fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str(&content)
-            .map(Some)
-            .map_err(|error| AppError::AgentConfig(format!("{}: {error}", path.display()))),
+        Ok(content) => serde_json::from_str(&content).map(Some).map_err(|error| {
+            AppError::AgentConfig(format!(
+                "{}: invalid JSON or field type at line {} column {}",
+                path.display(),
+                error.line(),
+                error.column()
+            ))
+        }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(AppError::AgentConfig(format!(
             "{}: {error}",
@@ -861,8 +895,14 @@ fn load_json_config(path: &Path) -> Result<Option<JsonConfig>, AppError> {
 
 fn load_provider_registry(path: &Path) -> Result<ProviderRegistry, AppError> {
     match fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str(&content)
-            .map_err(|error| AppError::AgentConfig(format!("{}: {error}", path.display()))),
+        Ok(content) => serde_json::from_str(&content).map_err(|error| {
+            AppError::AgentConfig(format!(
+                "{}: invalid JSON or field type at line {} column {}",
+                path.display(),
+                error.line(),
+                error.column()
+            ))
+        }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(ProviderRegistry::default())
         }
@@ -1127,6 +1167,28 @@ mod tests {
         assert_eq!(config.request_timeout_secs, 120);
         assert!(!config.verbose);
         assert!(config.working_dir.is_absolute());
+    }
+
+    #[test]
+    fn explicit_enabled_tools_override_automatic_connector_defaults() {
+        let file = FileConfig {
+            agent: Some(AgentFileConfig {
+                enabled_tools: Some(vec!["read_file".into()]),
+                ..Default::default()
+            }),
+        };
+        let environment = HashMap::from([
+            ("GOOGLE_GMAIL_CLIENT_ID".into(), "client".into()),
+            ("GOOGLE_CALENDAR_CLIENT_ID".into(), "client".into()),
+        ]);
+        let config = Config::from_sources_with_file(
+            &cli(&["--working-dir", "."]),
+            &environment,
+            file,
+            ProviderRegistry::default(),
+        )
+        .unwrap();
+        assert_eq!(config.enabled_tools, ["read_file"]);
     }
 
     #[test]

@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <title>AI Agent</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script src="/startup-error.js"></script>
   </head>
   <body>
     <main class="shell">
@@ -19,22 +20,60 @@
         <div class="status-wrap">
           <span id="thinking" class="thinking-indicator" hidden><i></i> Thinking</span>
           <span id="status" class="status">Starting service…</span>
-          <button id="settings" class="toolbar-button settings-button" type="button" title="Configuration" aria-label="Open configuration">⚙</button>
+          <button id="switch-project" class="toolbar-button" type="button" hidden>Switch project</button>
+          <button id="settings" class="toolbar-button settings-button" type="button" title="Configuration" aria-label="Open configuration" hidden>⚙</button>
         </div>
       </header>
 
-      <section class="workspace">
+      <section id="launcher" class="launcher" aria-labelledby="launcher-title">
+        <div class="launcher-intro">
+          <p class="eyebrow">CHOOSE AN OPERATING MODE</p>
+          <h2 id="launcher-title">What are we building today?</h2>
+          <p>Start with a project-aware agent or explore the next desktop workspaces.</p>
+        </div>
+        <div class="mode-grid" aria-label="Agent modes">
+          <button class="mode-card active" type="button" data-mode="chatbot">
+            <span class="mode-index">01</span><strong>Chat-bot</strong><small>Project-aware conversation</small>
+          </button>
+          <button class="mode-card" type="button" data-mode="assistant">
+            <span class="mode-index">02</span><strong>Assistant</strong><small>Mail, calendar and search</small>
+          </button>
+          <button class="mode-card" type="button" data-mode="tutor">
+            <span class="mode-index">03</span><strong>AI Tutor</strong><small>Unavailable · lesson contract preview only</small>
+          </button>
+          <button class="mode-card" type="button" data-mode="coder">
+            <span class="mode-index">04</span><strong>Coder</strong><small>Files, diffs and runtime</small>
+          </button>
+        </div>
+        <div class="launch-grid">
+          <section class="launch-panel">
+            <div class="panel-heading"><span>Recent projects</span><span id="recent-count" class="count-badge">0</span></div>
+            <div id="recent-projects" class="recent-projects" aria-live="polite">
+              <span class="empty-state">Loading project history…</span>
+            </div>
+          </section>
+          <section class="launch-panel launch-project">
+            <p class="eyebrow">PROJECT SETUP</p>
+            <h3>Open a workspace</h3>
+            <p id="launcher-feedback" class="launcher-feedback" aria-live="polite">Choose a recent project or select a directory.</p>
+            <label class="field-label" for="project-path">Project path</label>
+            <div class="path-picker">
+              <input id="project-path" type="text" value="." autocomplete="off" />
+              <button id="choose-project" class="secondary-button path-button" type="button">Choose…</button>
+            </div>
+            <button id="open-project" class="primary-button" type="button">Open project</button>
+            <div class="rag-preview" aria-disabled="true"><span>RAG KNOWLEDGE</span><strong>Indexing arrives in a later stage</strong></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="workspace" class="workspace" hidden>
         <aside class="sidebar">
           <div class="panel-heading">
             <span>Project</span>
             <button id="refresh" class="icon-button" type="button" title="Refresh capabilities">↻</button>
           </div>
-          <label class="field-label" for="project-path">Project path</label>
-          <div class="path-picker">
-            <input id="project-path" type="text" value="." autocomplete="off" />
-            <button id="choose-project" class="secondary-button path-button" type="button">Choose…</button>
-          </div>
-          <button id="open-project" class="primary-button" type="button">Open project</button>
+           <p id="active-project-path" class="active-project-path">No project selected</p>
           <label class="field-label session-label" for="provider">Provider</label>
           <select id="provider" class="select-input" disabled>
             <option value="">Open a project first</option>
@@ -42,6 +81,10 @@
           <label class="field-label model-label" for="model">Model</label>
           <input id="model" type="text" value="demo-model" autocomplete="off" disabled />
           <button id="create-session" class="secondary-button" type="button" disabled>Create session</button>
+          <label class="field-label session-label" for="saved-sessions">Recent sessions (up to 10)</label>
+          <select id="saved-sessions" class="select-input" disabled><option value="">No saved sessions</option></select>
+          <button id="restore-saved-session" class="secondary-button" type="button" disabled>Continue selected session</button>
+          <button id="delete-saved-session" class="secondary-button" type="button" disabled>Delete selected session</button>
           <div class="meta-grid">
             <div class="meta-card"><span class="meta-label">API</span><strong id="api-version">—</strong></div>
             <div class="meta-card"><span class="meta-label">Capabilities</span><strong id="capabilities">—</strong></div>
@@ -59,6 +102,32 @@
         </aside>
 
         <section class="chat-panel">
+          <section id="assistant-panel" class="assistant-panel" hidden aria-label="Assistant actions">
+            <div class="assistant-header"><div><span class="eyebrow">READ-ONLY WORKSPACE</span><h2>Assistant</h2></div><button id="assistant-refresh" class="toolbar-button" type="button">Refresh permissions</button></div>
+            <p class="settings-help">Mail, calendar, web and local documents use project tools. Assistant cannot modify files or send mail. Selected document content is processed in Rust and sent to your configured LLM on Send; choose files inside the project working directory.</p>
+            <div class="assistant-actions">
+              <button type="button" data-assistant-action="calendar">Calendar</button>
+              <button type="button" data-assistant-action="mail">Mail</button>
+              <button type="button" data-assistant-action="web_search">Web Search</button>
+              <button type="button" data-assistant-action="local_document">Local document</button>
+              <button type="button" disabled title="Cloud document connector not implemented">Cloud documents · planned</button>
+              <button type="button" disabled title="Document recognition not implemented">Recognition · planned</button>
+              <button type="button" disabled title="Document conversion not implemented">Conversion · planned</button>
+              <button type="button" disabled title="Document summary shortcut not implemented">Summary · planned</button>
+              <button type="button" disabled title="Document feedback shortcut not implemented">Feedback · planned</button>
+            </div>
+            <div class="assistant-presets"><label class="field-label" for="assistant-preset">My prompt presets (instructions, not autonomous subagents)</label><select id="assistant-preset"><option value="">Choose a preset…</option></select><button id="assistant-manage" type="button" class="toolbar-button">Manage prompts</button></div>
+            <p id="assistant-status" class="settings-status" role="status" aria-live="polite"></p>
+          </section>
+          <section id="coder-panel" class="coder-panel" hidden aria-label="Coder project inspection">
+            <div class="assistant-header"><div><span class="eyebrow">PROJECT INSPECTION · READ ONLY</span><h2>Coder</h2></div><button id="coder-refresh" class="toolbar-button" type="button">Refresh</button></div>
+            <p class="settings-help">Project files and Git changes only. Agent edits, build/test execution and virtual environment creation are unavailable until a sandboxed approval contract exists. No shell is exposed.</p>
+            <p id="coder-status" class="settings-status" role="status" aria-live="polite"></p>
+            <div class="coder-grid"><section><h3>Files</h3><div id="coder-tree" class="coder-list"></div></section><section><h3>Changes</h3><div id="coder-changes" class="coder-list"></div></section></div>
+            <div class="coder-controls"><label for="coder-staged">Diff source</label><select id="coder-staged"><option value="false">Unstaged</option><option value="true">Staged</option></select><button id="coder-check" type="button" class="toolbar-button">Check whitespace</button></div>
+            <pre id="coder-diff" class="coder-output" aria-label="Selected file diff">Select a changed file to view its diff.</pre>
+            <p id="coder-venv" class="settings-help"></p>
+          </section>
           <div id="messages" class="messages" aria-live="polite">
             <article class="message assistant">
               <span class="message-label">SYSTEM</span>
@@ -66,12 +135,10 @@
             </article>
           </div>
           <form id="composer" class="composer">
-            <div id="attachments" class="attachments" hidden></div>
             <textarea id="prompt" rows="1" placeholder="Ask the agent about this project…" disabled></textarea>
             <div class="composer-toolbar">
               <div class="toolbar-actions">
                 <button id="quote" class="toolbar-button" type="button" title="Quote selected text">❝ <span>Quote</span></button>
-                <button id="attach" class="toolbar-button" type="button" title="Attach a file">＋ <span>Attach file</span></button>
                 <span id="used-tools" class="used-tools" hidden></span>
               </div>
               <button id="send" class="send-button" type="submit" disabled>Send <span>↗</span></button>
@@ -79,7 +146,7 @@
           </form>
         </section>
       </section>
-      <footer class="bottom-dock">
+      <footer id="bottom-dock" class="bottom-dock" hidden>
         <details class="trace-panel">
           <summary>Execution log</summary>
           <pre id="trace" class="trace" aria-live="polite"></pre>
@@ -99,7 +166,7 @@
           </div>
           <button class="icon-button" value="cancel" type="submit" title="Close">×</button>
         </div>
-        <p class="settings-help">Edit the project configuration and provider registry. Changes are validated and saved atomically.</p>
+        <p class="settings-help">These raw project files may contain API keys and connector secrets. They are visible to this local WebView editor; only open trusted projects. Changes are validated and saved locally.</p>
         <label class="field-label" for="config-json">.aiagent/config.json</label>
         <textarea id="config-json" class="config-editor" spellcheck="false"></textarea>
         <label class="field-label" for="providers-json">.aiagent/providers.json</label>
@@ -111,20 +178,15 @@
         </div>
       </form>
     </dialog>
-    <script>
-      // Keep startup failures visible in the window. A module import can fail
-      // before app.js runs, which otherwise leaves the initial status frozen.
-      window.reportFrontendError = (error) => {
-        const status = document.querySelector("#status");
-        if (status) status.textContent = `Frontend error: ${String(error)}`;
-      };
-      window.addEventListener("error", (event) => {
-        window.reportFrontendError(event.error?.message || event.message);
-      });
-      window.addEventListener("unhandledrejection", (event) => {
-        window.reportFrontendError(event.reason);
-      });
-    </script>
-    <script type="module" src="./app.js" onerror="window.reportFrontendError('failed to load app.js')"></script>
+    <dialog id="assistant-dialog" class="settings-dialog">
+      <form method="dialog" class="settings-card">
+        <div class="settings-header"><div><span class="eyebrow">PROJECT ASSISTANT</span><h2>Custom prompts</h2></div><button class="icon-button" value="cancel" type="submit" aria-label="Close">×</button></div>
+        <p class="settings-help">Presets are project-local instructions, not permissions. They cannot enable tools. Up to 20 presets, 4000 characters each.</p>
+        <label class="field-label" for="assistant-prompt-name">Preset name</label><input id="assistant-prompt-name" maxlength="80" autocomplete="off" />
+        <label class="field-label" for="assistant-prompt-instruction">Instruction</label><textarea id="assistant-prompt-instruction" class="config-editor" maxlength="4000"></textarea>
+        <div class="settings-actions"><button id="assistant-prompt-delete" class="toolbar-button" type="button">Delete selected</button><span id="assistant-prompt-status" class="settings-status" role="status"></span><button id="assistant-prompt-save" class="primary-button" type="button">Save preset</button></div>
+      </form>
+    </dialog>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>

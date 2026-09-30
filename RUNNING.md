@@ -1,4 +1,4 @@
-# Running via-agent 1.0.1
+# Running via-agent
 
 This guide explains how to configure and run both clients:
 
@@ -93,6 +93,21 @@ Run from the repository during development:
 cargo run -- --working-dir /path/to/project
 ```
 
+For interactive `ai-agent` without a directory argument or
+`AI_AGENT_PROJECT_DIR`, subsequent launches offer available recent projects,
+most recently opened first, plus the current directory. Use arrow keys and
+Enter to select; Esc keeps the current directory. The first launch behaves as
+before. Explicit `--project-dir`/`--working-dir`, one-shot prompts, `--init`,
+OAuth login and scheduler skip the picker. After selecting a project, the CLI
+still asks separately whether to load its legacy
+`<working-dir>/.aiagent/session.json` (default: no). CLI history remains
+separate from Desktop's `.aiagent/sessions/` histories.
+
+Successful CLI opens record project metadata in `~/.ai-agent/state.json`,
+shared with the Desktop launcher; no messages or credentials are recorded.
+Missing recent directories are not offered. A corrupt/incompatible state file
+is reported but preserved; explicit CLI paths continue to work.
+
 Run a single prompt:
 
 ```bash
@@ -153,22 +168,141 @@ Start the desktop client:
 make desktop
 ```
 
-The Tauri window opens the frontend through the local Vite server. In the UI:
+Development always uses `127.0.0.1:1420`, matching `tauri.conf.json`. Vite is
+configured with a strict port and will stop with an explicit error instead of
+silently moving to `1421`, which Tauri cannot load. If another previous dev
+process still owns the port, stop that process with `Ctrl+C` before retrying.
 
-1. Click `Choose…` and select a project directory.
-2. Click `Open project`.
-3. Select a provider and a model.
-4. Click `Create session`.
-5. Enter a prompt and click `Send`.
+Vite also loads its config natively. This prevents temporary bundled config
+files under `frontend/node_modules/.vite-temp` from triggering Tauri's Rust
+watcher during the initial binary link.
+
+The Tauri window opens the launcher through the local Vite server. In the UI:
+
+1. Select `Chat-bot`, `Assistant` or read-only `Coder` on the mode screen.
+   `AI Tutor` remains an inactive placeholder: clicking it shows an unavailable
+   notice and never opens a project or starts a lesson.
+2. Choose an available recent project, or click `Choose…` and select a project
+   directory.
+3. Click `Open project`. The chat workspace appears only after Rust validates
+   the path and loads its configuration.
+4. If a compatible indexed session or legacy `.aiagent/session.json` exists, its UUID, provider, model
+   and history are restored in the backend; the UI displays a message count,
+   not the previous conversation. Otherwise select a provider and model, then
+    click `Create session`. Use `Recent sessions` and `Continue selected session`
+    to switch back. `Create session` starts a separate history, including when a
+    session is already active. Up to ten recent sessions are kept per project;
+     creating the eleventh deletes the least recently updated. The dropdown
+     shows a short first-prompt title and last-update time. `Delete selected
+     session` asks for confirmation and removes only its Desktop history; the
+     legacy CLI copy is unaffected. File attachments are not supported yet;
+     there is no Attach button. A corrupt or
+    incompatible history is kept intact and reported; repair it before creating
+    new sessions.
+5. For Chat-bot or Assistant, enter a prompt and click `Send`. Desktop does not stop at 20 tool rounds;
+    it continues until the agent finishes or the configured `max_loop_seconds`
+    timeout is reached (600 seconds by default). CLI requests still honor
+    `max_tool_rounds`.
+    Chat-bot can create and edit files in the selected project by default,
+    without CLI `--allow-write`. Only tools in `enabled_tools` are available;
+    the default set includes `write_file`, `create_file`, and `apply_patch`.
+    Desktop applies patches without terminal confirmation, but does not enable
+    Git commit/push or shell commands. Files outside the project (including via
+    symlinks), secrets, `.git/`, and `.aiagent/` remain protected. File edits
+    require a Git repository for checkpoints. If `working_dir` points to a
+    different directory or `confirm_writes` is enabled, Desktop refuses file
+    mutations rather than silently writing elsewhere or skipping a requested
+    confirmation. The CLI retains its read-only default and interactive prompts.
+6. Use `Switch project` to return to the launcher. The active project and
+   session selection are cleared, while persisted recent projects remain.
+
+### Assistant workspace
+
+Choose Assistant before opening a project, then create or restore a session.
+Calendar, Mail and Web Search buttons prepare editable requests; pressing Send
+executes them through the read-only Rust agent tool registry. Availability comes
+from the project's enabled tools and connector configuration. Refresh permissions
+after changing settings. A configured client ID is not proof of a valid OAuth
+login or network access: failed calls report an error rather than fabricating
+results. See [mail setup](README.md#работа-с-почтой) for Gmail/Outlook OAuth;
+Google Calendar requires `GOOGLE_CALENDAR_CLIENT_ID` and prior authorization,
+or uses macOS Calendar access on macOS. Web Search defaults to DuckDuckGo; Tavily
+requires `WEB_SEARCH_PROVIDER=tavily` and `WEB_SEARCH_API_KEY`.
+Set `enabled_tools` explicitly in `.aiagent/config.json` to turn off individual
+tools; automatic mail/calendar/macOS defaults apply only when the field is absent.
+For example, removing `list_calendar_events` disables Calendar even on macOS.
+
+Local document selects a file in the configured tool `working_dir` and prepares
+a prompt. On Send, Rust calls `mcp_read_local_file` and sends the extracted text
+to the selected LLM provider. The WebView receives neither raw tool output nor
+the document text. The tool checks canonical paths (including symlinks), allows
+only `toml`, `yml`, `yaml`, `txt`, `json`, `md`, `doc`, `docx`, `pdf`, limits input to
+5 MB and Assistant prompt output to 30 KB; `pdf` requires `pdftotext`, `docx`
+requires `unzip`, and `doc` requires `textutil`. Do not select a confidential
+document unless you trust your configured LLM provider. Session history contains
+the submitted document text; the global launcher state does not. Cloud document
+access, recognition, conversion, one-click summary and feedback are disabled
+placeholders, not working connectors.
+
+Manage prompts stores up to 20 named project-local presets in versioned
+`.aiagent/assistant-prompts.json`. Presets are editable instructions, not
+independent subagents and never grant tools. An invalid or unknown-version
+document is preserved and must be fixed explicitly. Assistant's allowlist
+removes all file-write, process, Git mutation and mail-send tools, even when
+Chat-bot in the same session permits writes; changing modes reloads the latest
+checkpoint. The web search tool can contact external services; do not include
+private data in search queries.
+
+### Coder workspace (read-only preview)
+
+Select Coder before opening the project. Inspect the bounded file tree and Git
+changes; click a changed file to see staged/unstaged diff. Git inspection only
+works when the selected project directory is itself a Git repository root.
+`Check whitespace` runs only `git diff --check`; it does not run project tests.
+The `.venv` indicator inspects metadata and never executes or creates an
+environment. Composer is disabled, and agent writes, project builds, pip and
+rollback are not implemented for Desktop Coder yet. See
+[the safety contract](docs/desktop-coder.md) for limits and manual checks.
+
+### AI Tutor (contract preview, not available)
+
+The AI Tutor card cannot start lessons, make provider calls, record audio or
+save progress. Rust exposes a project-scoped `get_tutor_capabilities` metadata
+command with all Tutor features set to false and a reason. Its lesson and
+session DTOs are contract types only; they are not executable or persisted.
+Neither Chat-bot nor Assistant `Send` is a Tutor endpoint, and their sessions
+and editing permissions must not be used as a workaround. See
+[Tutor architecture and threat model](docs/desktop-tutor.md) for planned text,
+voice, cancellation, lesson editing and progress boundaries.
+
+Manual check: click the Tutor card on the launcher and confirm the explicit
+unavailable notice. Select Chat-bot afterward and verify that Chat-bot still
+works normally; Tutor never becomes the active mode and no Tutor history,
+microphone prompt or lesson controls appear. With a project open, the
+`get_tutor_capabilities` application command reports `available: false` and
+all feature flags false; with an unknown project ID it returns an error.
+
+The RAG block is a disabled design placeholder; this stage does not index or
+send project content to a retrieval service. Missing recent project paths are
+shown as unavailable and cannot be opened from the list.
 
 The gear button in the top-right opens editors for:
 
 - `.aiagent/config.json`;
 - `.aiagent/providers.json`.
 
-The backend validates both JSON documents and writes them atomically. The
+The backend validates both JSON documents and writes each file atomically. The
 execution log is available at the bottom of the window. It is collapsed by
 default and can be expanded when diagnosing provider or tool errors.
+
+This is a **trusted local editor exception** to the ordinary secret-free DTO
+contract: the two raw JSON files (including any provider API key and connector
+secret in `config.json`) cross Tauri IPC into the WebView only when settings
+are opened. The textareas clear on closing the dialog. Settings errors are not
+copied to the execution log, but the files remain on disk and settings writes
+are atomic per file, not a two-file transaction. Do not open untrusted projects
+or inject remote scripts into this window. OAuth refresh tokens in the OS
+credential store are not exposed by this editor.
 
 ### Release desktop build
 
@@ -187,15 +321,45 @@ make desktop-build
 Artifacts are generated under:
 
 ```text
-src-tauri/target/release/bundle/
+target/release/bundle/
 ```
 
 Install a local `via-agent` launcher:
 
 ```bash
 make desktop-install
+via-agent
+```
+
+The launcher executes the current Cargo workspace build from
+`target/release/bundle/macos/via-agent.app` on macOS. If you installed it
+before this path was corrected, rerun `make desktop-install` to replace the
+old launcher. Open the `.app` in that directory to launch the packaged GUI
+directly; the DMG is under `target/release/bundle/dmg/`.
+
+Locally built macOS bundles are not Developer ID signed or notarized by
+default. For distribution to another Mac, configure signing and notarization
+before shipping the DMG; Gatekeeper may reject an unsigned downloaded app.
+The Linux CI quality job does not build a signed Desktop installer. The
+automated release workflow currently publishes a Linux **CLI** archive only;
+Desktop packages need separate platform signing and manual distribution checks.
+
+The release version comes from the workspace `Cargo.toml`. The auto-release PR
+updates Cargo.lock, the Tauri bundle version and both npm manifests together;
+`python3 scripts/check_versions.py` rejects any drift before release. Packaged
+frontend assets use a local, external startup-error script and keep the strict
+Tauri CSP (`script-src 'self'`); no inline event handlers or `unsafe-inline`.
+
+Open an existing project directly, or choose one from the launcher:
+
+```bash
 via-agent --working-dir /path/to/project
 ```
+
+Invalid direct-open paths are reported to stderr and leave the launcher
+available. Desktop histories are stored in `.aiagent/sessions/`; legacy
+`.aiagent/session.json` is copied when first restored or before creating a
+new Desktop session, and remains available to the CLI.
 
 The console command remains:
 
@@ -246,5 +410,9 @@ arguments, tool results, API keys, and OAuth tokens.
 cargo fmt --all -- --check
 cargo test --workspace
 cargo check --workspace
-cd frontend && npm run check && npm run build
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+npm --prefix frontend ci
+npm --prefix frontend run check
+npm --prefix frontend run build
+python3 scripts/check_versions.py
 ```

@@ -4,24 +4,39 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { createAssistantUI } from "./assistant-ui.js";
+import { createCoderUI } from "./coder-ui.js";
+import {
+  ROUTES,
+  applyStartupState,
+  beginProjectOpen,
+  canActivateMode,
+  completeProjectOpen,
+  createAppState,
+  failProjectOpen,
+  returnToLauncher,
+} from "./state.js";
 
 document.querySelector("#app-version").textContent = `via-agent v${__APP_VERSION__}`;
 
-if (typeof window.reportFrontendError === "function") {
-  window.reportFrontendError = (error) => {
-    const status = document.querySelector("#status");
-    if (status) status.textContent = `Frontend error: ${String(error)}`;
-  };
-}
-
 const status = document.querySelector("#status");
+const launcher = document.querySelector("#launcher");
+const workspace = document.querySelector("#workspace");
+const bottomDock = document.querySelector("#bottom-dock");
 const pathInput = document.querySelector("#project-path");
+const launcherFeedback = document.querySelector("#launcher-feedback");
+const recentProjects = document.querySelector("#recent-projects");
+const recentCount = document.querySelector("#recent-count");
+const activeProjectPath = document.querySelector("#active-project-path");
 const apiVersion = document.querySelector("#api-version");
 const capabilities = document.querySelector("#capabilities");
 const models = document.querySelector("#models");
 const providerInput = document.querySelector("#provider");
 const modelInput = document.querySelector("#model");
 const createSessionButton = document.querySelector("#create-session");
+const savedSessions = document.querySelector("#saved-sessions");
+const restoreSavedButton = document.querySelector("#restore-saved-session");
+const deleteSavedButton = document.querySelector("#delete-saved-session");
 const session = document.querySelector("#session");
 const messages = document.querySelector("#messages");
 const trace = document.querySelector("#trace");
@@ -29,24 +44,129 @@ const promptInput = document.querySelector("#prompt");
 const composer = document.querySelector("#composer");
 const sendButton = document.querySelector("#send");
 const thinking = document.querySelector("#thinking");
-const attachments = document.querySelector("#attachments");
 const usedTools = document.querySelector("#used-tools");
 const quoteButton = document.querySelector("#quote");
-const attachButton = document.querySelector("#attach");
 const toolEvents = document.querySelector("#tool-events");
 const settingsButton = document.querySelector("#settings");
+const switchProjectButton = document.querySelector("#switch-project");
 const settingsDialog = document.querySelector("#settings-dialog");
 const configEditor = document.querySelector("#config-json");
 const providersEditor = document.querySelector("#providers-json");
 const settingsStatus = document.querySelector("#settings-status");
 const reloadSettingsButton = document.querySelector("#reload-settings");
 const saveSettingsButton = document.querySelector("#save-settings");
+settingsDialog.addEventListener("close", () => {
+  configEditor.value = "";
+  providersEditor.value = "";
+});
 let activeProject;
 let activeSession;
-let attachedFiles = [];
 let usedToolNames = new Set();
 let activityTimer;
 let availableProviders = [];
+let appState = createAppState();
+let pendingRestoredSession;
+let projectSessions = [];
+let busy = false;
+let selectedMode = "chatbot";
+const assistant = createAssistantUI({ invoke, open, promptInput, getProject: () => activeProject, getSession: () => activeSession, isBusy: () => busy });
+const coder = createCoderUI({ invoke, getProject: () => activeProject });
+
+function renderSavedSessions() {
+  const selected = savedSessions.value || activeSession?.id;
+  savedSessions.replaceChildren();
+  for (const item of projectSessions) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = `${item.title || "New conversation"} · ${item.provider} / ${item.model} · ${item.updated_at ? formatOpenedAt(item.updated_at) : "legacy"} (${item.message_count})`;
+    savedSessions.append(option);
+  }
+  if (projectSessions.some((item) => item.id === selected)) savedSessions.value = selected;
+  if (!projectSessions.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No saved sessions";
+    savedSessions.append(option);
+  }
+  savedSessions.disabled = busy || !projectSessions.length;
+  restoreSavedButton.disabled = busy || !projectSessions.length;
+  deleteSavedButton.disabled = busy || !projectSessions.some((item) => item.id === savedSessions.value && item.created_at);
+}
+
+async function refreshSessions() {
+  const envelope = await execute({ type: "list_sessions", payload: { project_id: activeProject.id } });
+  projectSessions = eventPayload(envelope, "sessions_listed").sessions;
+  renderSavedSessions();
+}
+
+function activateSession(value, restored = false) {
+  assistant.clearDocument();
+  activeSession = value;
+  session.textContent = `${value.provider} / ${value.model} · ${value.id.slice(0, 8)}`;
+  providerInput.value = value.provider;
+  modelInput.value = value.model;
+  modelInput.dataset.provider = value.provider;
+  renderModels(availableProviders);
+  createSessionButton.disabled = busy;
+  promptInput.disabled = selectedMode === "coder";
+  sendButton.disabled = selectedMode === "coder";
+  resetConversation();
+  if (restored) messages.querySelector("p").textContent = `${value.message_count} previous messages are loaded in the backend. Previous messages are not displayed yet.`;
+  status.textContent = restored ? `Session restored · ${value.model}` : "Session ready";
+  savedSessions.value = value.id;
+  assistant.render();
+  coder.render();
+}
+
+function renderRoute() {
+  const inWorkspace = appState.route === ROUTES.WORKSPACE;
+  launcher.hidden = inWorkspace;
+  workspace.hidden = !inWorkspace;
+  bottomDock.hidden = !inWorkspace;
+  settingsButton.hidden = !inWorkspace;
+  switchProjectButton.hidden = !inWorkspace;
+  if (inWorkspace) activeProjectPath.textContent = appState.activeProject.path;
+  assistant.render();
+  coder.render();
+}
+
+function projectName(path) {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function formatOpenedAt(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "previously opened" : date.toLocaleString();
+}
+
+function renderRecentProjects() {
+  recentProjects.replaceChildren();
+  const projects = appState.startup.recentProjects;
+  recentCount.textContent = String(projects.length);
+  if (!projects.length) {
+    const empty = document.createElement("span");
+    empty.className = "empty-state";
+    empty.textContent = "No recent projects yet. Choose a directory to begin.";
+    recentProjects.append(empty);
+    return;
+  }
+  for (const project of projects) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "recent-project";
+    button.disabled = !project.available;
+    if (project.id === appState.startup.suggestedProjectId) button.classList.add("suggested");
+    const name = document.createElement("strong");
+    name.textContent = projectName(project.path);
+    const path = document.createElement("span");
+    path.textContent = project.path;
+    const meta = document.createElement("small");
+    meta.textContent = project.available ? formatOpenedAt(project.last_opened_at) : "Project path is unavailable";
+    button.append(name, path, meta);
+    button.addEventListener("click", () => openProject(project.path));
+    recentProjects.append(button);
+  }
+}
 
 function logStep(message, details = "") {
   const line = `[${new Date().toLocaleTimeString()}] ${message}${details ? `: ${details}` : ""}`;
@@ -93,7 +213,7 @@ function providersFrom(envelope) {
 // explicitly creates the session.
 function renderModels(providerList) {
   availableProviders = providerList;
-  const selectedProvider = providerInput.value;
+  const selectedProvider = modelInput.dataset.provider || providerInput.value;
   providerInput.replaceChildren();
   for (const provider of providerList) {
     const option = document.createElement("option");
@@ -126,7 +246,12 @@ function renderModels(providerList) {
     button.dataset.model = entry.model;
     button.dataset.provider = entry.provider;
     button.title = `${entry.provider} / ${entry.model}`;
-    button.innerHTML = `<span>${entry.model}</span><small>${entry.provider}</small>`;
+    const title = document.createElement("span");
+    title.textContent = entry.model;
+    const subtitle = document.createElement("small");
+    subtitle.textContent = entry.provider;
+    button.append(title, subtitle);
+    if (entry.model === modelInput.value && entry.provider === providerInput.value) button.classList.add("selected");
     button.addEventListener("click", () => {
       modelInput.value = entry.model;
       providerInput.value = entry.provider;
@@ -153,6 +278,7 @@ function selectProvider(providerName) {
 
 function showError(error) {
   status.textContent = "Service error";
+  launcherFeedback.textContent = String(error);
   logStep("ERROR", String(error));
   const item = document.createElement("article");
   item.className = "message error";
@@ -169,20 +295,17 @@ function appendUserMessage(content) {
   messages.append(item);
 }
 
+function resetConversation() {
+  messages.replaceChildren();
+  const item = document.createElement("article");
+  item.className = "message assistant";
+  item.innerHTML = `<span class="message-label">SYSTEM</span><p>Select a model and create a session for this project.</p>`;
+  messages.append(item);
+}
+
 function setThinking(value) {
   thinking.hidden = !value;
   if (value) status.textContent = "Agent is thinking…";
-}
-
-function renderComposerAttachments() {
-  attachments.replaceChildren();
-  attachments.hidden = attachedFiles.length === 0;
-  for (const file of attachedFiles) {
-    const chip = document.createElement("span");
-    chip.className = "attachment-chip";
-    chip.textContent = file.name;
-    attachments.append(chip);
-  }
 }
 
 function renderUsedTools() {
@@ -226,14 +349,19 @@ async function loadSettings() {
     return;
   }
   settingsStatus.textContent = "Loading…";
+  const projectId = activeProject.id;
   try {
-    const documents = await invoke("read_settings", { projectId: activeProject.id });
+    const documents = await invoke("read_settings", { projectId });
+    if (!settingsDialog.open || activeProject?.id !== projectId) return;
     configEditor.value = documents.config_json;
     providersEditor.value = documents.providers_json;
     settingsStatus.textContent = "Loaded";
-  } catch (error) {
+  } catch {
+    if (!settingsDialog.open || activeProject?.id !== projectId) return;
     settingsStatus.textContent = "Load failed";
-    showError(error);
+    // Keep settings errors out of the generic execution log: project files
+    // contain credentials, even though known validation errors are sanitized.
+    status.textContent = "Settings load failed; inspect the project files locally";
   }
 }
 
@@ -261,9 +389,10 @@ saveSettingsButton.addEventListener("click", async () => {
     settingsDialog.close();
     const modelEnvelope = await refreshModels(activeProject.id);
     renderModels(providersFrom(modelEnvelope));
+    await assistant.refresh();
   } catch (error) {
     settingsStatus.textContent = "Save failed";
-    showError(error);
+    status.textContent = "Settings save failed; check the project JSON locally";
   } finally {
     saveSettingsButton.disabled = false;
   }
@@ -307,44 +436,101 @@ async function loadCapabilities() {
       value.cancellation ? "cancel" : "no cancel",
       value.confirmations ? "confirmations" : "read-only",
     ].join(" · ");
-    status.textContent = "Service ready";
-    const modelEnvelope = await execute({ type: "list_models" });
-    const providerList = providersFrom(modelEnvelope);
-    renderModels(providerList);
-    logStep("startup complete", `${providerList.length} provider(s) in registry`);
+    const startupEnvelope = await execute({ type: "get_startup_state" });
+    appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
+    renderRecentProjects();
+    renderRoute();
+    status.textContent = "Choose a project";
+    launcherFeedback.textContent = appState.startup.recentProjects.length
+      ? "Continue with a recent project or choose another directory."
+      : "Choose a directory to create your first desktop workspace.";
+    logStep("startup complete", `${appState.startup.recentProjects.length} recent project(s)`);
+    const directPath = await invoke("initial_project_path");
+    if (directPath) await openProject(directPath);
   } catch (error) {
     showError(error);
   }
 }
 
-document.querySelector("#open-project").addEventListener("click", async () => {
+async function openProject(path) {
+  if (busy) return;
+  appState = beginProjectOpen(appState);
+  pathInput.value = path;
+  launcherFeedback.textContent = "Opening project and loading its configuration…";
+  document.querySelector("#open-project").disabled = true;
   status.textContent = "Opening project…";
-  logStep("open project", pathInput.value || "empty path");
+  logStep("open project", path || "empty path");
   try {
     const envelope = await execute({
       type: "open_project",
-      payload: { path: pathInput.value },
+      payload: { path },
     });
     const project = eventPayload(envelope, "project_opened");
     activeProject = project;
+    assistant.reset();
+    coder.reset();
     logStep("project opened", `${project.id}: ${project.path}`);
     createSessionButton.disabled = false;
+    activeSession = undefined;
+    projectSessions = [];
+    renderSavedSessions();
+    promptInput.disabled = true;
+    sendButton.disabled = true;
+    resetConversation();
     status.textContent = "Project opened; refreshing models…";
+    const sessionsEnvelope = await execute({
+      type: "get_restorable_session",
+      payload: { project_id: activeProject.id },
+    });
+    pendingRestoredSession = eventPayload(sessionsEnvelope, "restorable_session").session;
     const modelEnvelope = await refreshModels(activeProject.id);
     const providerList = providersFrom(modelEnvelope);
     renderModels(providerList);
-    const selectedProvider = providerList.find((provider) => provider.models.includes(modelInput.value));
-    if (selectedProvider) selectProvider(selectedProvider.name);
-    status.textContent = `Open: ${project.id}`;
+    if (pendingRestoredSession) {
+      const restored = await execute({
+        type: "restore_session",
+        payload: { project_id: activeProject.id, session_id: pendingRestoredSession.id },
+      });
+      activateSession(eventPayload(restored, "session_restored"), true);
+    } else {
+      const selectedProvider = providerList.find((provider) => provider.models.includes(modelInput.value));
+      if (selectedProvider) selectProvider(selectedProvider.name);
+      status.textContent = `Open: ${project.id}`;
+    }
+    await refreshSessions();
+    await assistant.refresh();
+    if (selectedMode === "coder") await coder.refresh();
+    if (activeSession) savedSessions.value = activeSession.id;
     const item = document.createElement("article");
     item.className = "message assistant";
     item.innerHTML = `<span class="message-label">PROJECT</span><p></p>`;
     item.querySelector("p").textContent = `Registered ${project.path}`;
     messages.append(item);
+    const startupEnvelope = await execute({ type: "get_startup_state" });
+    appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
+    renderRecentProjects();
+    appState = completeProjectOpen(appState, project);
+    renderRoute();
   } catch (error) {
+    appState = failProjectOpen(appState);
+    activeProject = undefined;
+    activeSession = undefined;
+    assistant.reset();
+    coder.reset();
+    pendingRestoredSession = undefined;
+    createSessionButton.disabled = true;
+    projectSessions = [];
+    renderSavedSessions();
+    promptInput.disabled = true;
+    sendButton.disabled = true;
+    renderRoute();
     showError(error);
+  } finally {
+    document.querySelector("#open-project").disabled = false;
   }
-});
+}
+
+document.querySelector("#open-project").addEventListener("click", () => openProject(pathInput.value));
 
 document.querySelector("#choose-project").addEventListener("click", async () => {
   logStep("choose project", "opening native directory picker");
@@ -363,45 +549,163 @@ document.querySelector("#choose-project").addEventListener("click", async () => 
 });
 
 createSessionButton.addEventListener("click", async () => {
-  if (!activeProject) return;
+  if (!activeProject || busy) return;
+  busy = true;
+  createSessionButton.disabled = true;
+  renderSavedSessions();
   try {
     const envelope = await execute({
       type: "create_session",
       payload: { project_id: activeProject.id, provider: modelInput.dataset.provider || "litellm", model: modelInput.value },
     });
     const created = eventPayload(envelope, "session_created");
-    activeSession = created;
-    session.textContent = `${created.model} · ${created.id.slice(0, 8)}`;
-    promptInput.disabled = false;
-    sendButton.disabled = false;
-    status.textContent = "Session ready";
+    activateSession(created);
+    await refreshSessions();
+    await assistant.refresh();
+    savedSessions.value = created.id;
+    renderSavedSessions();
+    const startupEnvelope = await execute({ type: "get_startup_state" });
+    appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
+    renderRecentProjects();
   } catch (error) {
     showError(error);
+  } finally {
+    busy = false;
+    createSessionButton.disabled = false;
+    renderSavedSessions();
   }
 });
+
+restoreSavedButton.addEventListener("click", async () => {
+  if (!activeProject || !savedSessions.value || busy) return;
+  const selectedId = savedSessions.value;
+  busy = true;
+  createSessionButton.disabled = true;
+  renderSavedSessions();
+  try {
+    const envelope = await execute({ type: "restore_session", payload: { project_id: activeProject.id, session_id: selectedId } });
+    activateSession(eventPayload(envelope, "session_restored"), true);
+    renderSavedSessions();
+    const startupEnvelope = await execute({ type: "get_startup_state" });
+    appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
+    renderRecentProjects();
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy = false;
+    createSessionButton.disabled = false;
+    renderSavedSessions();
+  }
+});
+
+savedSessions.addEventListener("change", renderSavedSessions);
+
+deleteSavedButton.addEventListener("click", async () => {
+  if (!activeProject || !savedSessions.value || busy || deleteSavedButton.disabled) return;
+  const selectedId = savedSessions.value;
+  const selected = projectSessions.find((item) => item.id === selectedId);
+  if (!window.confirm(`Delete session “${selected?.title || selectedId.slice(0, 8)}”? Its desktop history cannot be recovered.`)) return;
+  busy = true;
+  renderSavedSessions();
+  try {
+    await execute({ type: "delete_session", payload: { project_id: activeProject.id, session_id: selectedId } });
+    if (activeSession?.id === selectedId) {
+      activeSession = undefined;
+      session.textContent = "Not created";
+      promptInput.disabled = true;
+      sendButton.disabled = true;
+      resetConversation();
+      assistant.render();
+      assistant.clearDocument();
+      promptInput.value = "";
+    }
+    await refreshSessions();
+    const startupEnvelope = await execute({ type: "get_startup_state" });
+    appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
+    renderRecentProjects();
+    status.textContent = "Session deleted";
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy = false;
+    renderSavedSessions();
+  }
+});
+
+switchProjectButton.addEventListener("click", async () => {
+  if (busy) return;
+  appState = returnToLauncher(appState);
+  activeProject = undefined;
+  activeSession = undefined;
+  assistant.reset();
+  coder.reset();
+  promptInput.value = "";
+  pendingRestoredSession = undefined;
+  usedToolNames.clear();
+  availableProviders = [];
+  projectSessions = [];
+  renderSavedSessions();
+  createSessionButton.disabled = true;
+  promptInput.disabled = true;
+  sendButton.disabled = true;
+  session.textContent = "Not created";
+  renderUsedTools();
+  resetConversation();
+  renderRoute();
+  launcherFeedback.textContent = "Choose another recent project or select a directory.";
+  const startupEnvelope = await execute({ type: "get_startup_state" });
+  appState = applyStartupState(appState, eventPayload(startupEnvelope, "startup_state"));
+  renderRecentProjects();
+  pathInput.focus();
+});
+
+for (const mode of document.querySelectorAll(".mode-card")) {
+  mode.addEventListener("click", () => {
+    if (canActivateMode(mode.dataset.mode)) {
+      selectedMode = mode.dataset.mode;
+      assistant.setMode(selectedMode);
+      coder.setMode(selectedMode);
+      promptInput.disabled = selectedMode === "coder" || !activeSession;
+      sendButton.disabled = selectedMode === "coder" || !activeSession;
+      for (const card of document.querySelectorAll(".mode-card")) card.classList.toggle("active", card === mode);
+      document.querySelector(".launch-project .eyebrow").textContent = `${selectedMode.toUpperCase()} SETUP`;
+      launcherFeedback.textContent = selectedMode === "coder" ? "Select a project for read-only Coder inspection." : selectedMode === "assistant" ? "Select a project to open the Assistant workspace." : "Select a project to chat.";
+      pathInput.focus();
+      return;
+    }
+    launcherFeedback.textContent = "AI Tutor is unavailable: lesson execution, text/voice transport and progress are not implemented. No Tutor session will start; choose another mode.";
+  });
+}
 
 providerInput.addEventListener("change", () => selectProvider(providerInput.value));
 
 composer.addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = promptInput.value.trim();
-  if (!activeSession || !prompt) return;
+  if (selectedMode === "coder") return;
+  if (!activeSession || !prompt || busy) return;
   promptInput.disabled = true;
   sendButton.disabled = true;
+  busy = true;
+  switchProjectButton.disabled = true;
+  assistant.render();
+  createSessionButton.disabled = true;
+  renderSavedSessions();
   setThinking(true);
   usedToolNames.clear();
   renderUsedTools();
   toolEvents.replaceChildren();
   startActivityPolling();
-  logStep("send message", `${activeSession.id}: ${prompt}`);
+  logStep("send message", activeSession.id);
   appendUserMessage(prompt);
   messages.scrollTop = messages.scrollHeight;
   try {
     const request = requestId();
-    const envelope = await invoke("send_message", {
+    const envelope = await invoke(selectedMode === "assistant" ? "send_assistant_message" : "send_message", {
       requestId: request,
       sessionId: activeSession.id,
       prompt,
+      ...(selectedMode === "assistant" ? { documentPath: assistant.documentPath() } : {}),
     });
     const response = eventPayload(envelope, "assistant_message");
     const item = document.createElement("article");
@@ -416,15 +720,22 @@ composer.addEventListener("submit", async (event) => {
     // Keep the submitted prompt in the conversation and clear only the draft
     // composer for the next request.
     promptInput.value = "";
+    assistant.clearDocument();
     promptInput.style.height = "auto";
   } catch (error) {
     showError(error);
   } finally {
+    busy = false;
+    switchProjectButton.disabled = false;
+    assistant.render();
+    createSessionButton.disabled = false;
+    await refreshSessions().catch(showError);
+    if (activeSession) savedSessions.value = activeSession.id;
     stopActivityPolling();
     setThinking(false);
-    promptInput.disabled = false;
-    sendButton.disabled = false;
-    promptInput.focus();
+    promptInput.disabled = selectedMode === "coder" || !activeSession;
+    sendButton.disabled = selectedMode === "coder" || !activeSession;
+    if (!promptInput.disabled) promptInput.focus();
   }
 });
 
@@ -451,18 +762,7 @@ quoteButton.addEventListener("click", () => {
   promptInput.focus();
 });
 
-attachButton.addEventListener("click", async () => {
-  try {
-    const selected = await open({ multiple: true, directory: false, title: "Attach files" });
-    if (Array.isArray(selected)) attachedFiles = selected.map((path) => ({ name: path.split(/[\\/]/).pop(), path }));
-    else if (typeof selected === "string") attachedFiles = [{ name: selected.split(/[\\/]/).pop(), path: selected }];
-    renderComposerAttachments();
-    logStep("files attached", `${attachedFiles.length} file(s)`);
-  } catch (error) {
-    showError(error);
-  }
-});
-
 document.querySelector("#refresh").addEventListener("click", loadCapabilities);
 logStep("frontend ready");
+renderRoute();
 loadCapabilities();

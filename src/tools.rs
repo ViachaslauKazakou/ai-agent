@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     fs,
     io::{self, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::Stdio,
     sync::Arc,
     sync::Mutex,
@@ -25,6 +25,8 @@ pub struct ToolContext {
     pub confirm_writes: bool,
     pub command_allowlist: Vec<String>,
     pub interactive: bool,
+    /// Desktop project writes may apply patches without terminal stdin confirmation.
+    pub auto_approve_patch: bool,
     pub max_file_bytes: usize,
     pub max_result_bytes: usize,
     /// Read-only Microsoft Graph connection settings; token is never serialized.
@@ -53,6 +55,7 @@ impl ToolContext {
             confirm_writes: false,
             command_allowlist: Vec::new(),
             interactive: false,
+            auto_approve_patch: false,
             max_file_bytes: 1_000_000,
             max_result_bytes: 50_000,
             graph_base_url: None,
@@ -88,12 +91,26 @@ impl ToolContext {
     }
 
     fn resolve_new(&self, raw: &str) -> Result<PathBuf, AppError> {
+        if Path::new(raw)
+            .components()
+            .any(|component| component == Component::ParentDir)
+        {
+            return Err(AppError::PathOutsideWorkingDirectory(raw.to_owned()));
+        }
         let path = self.working_dir.join(raw);
+        // Canonicalize existing targets too: fs::write follows a symlink in the
+        // final component, even when its parent is inside working_dir.
+        if fs::symlink_metadata(&path).is_ok() {
+            return self.resolve_existing(raw);
+        }
+        if path.exists() {
+            return Err(AppError::Tool("недоступный путь назначения".to_owned()));
+        }
         let parent = path
             .parent()
             .ok_or_else(|| AppError::Tool("нет родительского каталога".to_owned()))?;
         let mut existing = parent;
-        while !existing.exists() {
+        while fs::symlink_metadata(existing).is_err() {
             existing = existing
                 .parent()
                 .ok_or_else(|| AppError::Tool("родительский каталог вне working_dir".to_owned()))?;
@@ -101,15 +118,20 @@ impl ToolContext {
         let canonical_existing = existing
             .canonicalize()
             .map_err(|error| AppError::Tool(error.to_string()))?;
+        if !canonical_existing.is_dir() {
+            return Err(AppError::Tool(
+                "родительский путь не является каталогом".to_owned(),
+            ));
+        }
         ensure_inside(&self.working_dir, &canonical_existing)?;
-        Ok(path.parent().unwrap_or(&self.working_dir).join(
-            path.file_name()
-                .ok_or_else(|| AppError::Tool("некорректное имя файла".to_owned()))?,
-        ))
+        let suffix = path
+            .strip_prefix(existing)
+            .map_err(|error| AppError::Tool(error.to_string()))?;
+        Ok(canonical_existing.join(suffix))
     }
 
     fn validate_edit(&self, path: &Path, content: &str) -> Result<(), AppError> {
-        if is_protected_path(path) {
+        if is_protected_path(path) || is_project_metadata_path(path) {
             return Err(AppError::UnsafeEdit(format!(
                 "запрещённый секретный или credential-файл: {}",
                 path.display()
@@ -162,6 +184,12 @@ fn is_protected_path(path: &Path) -> bool {
         || lower.contains("credential")
         || lower.contains("secret")
         || lower.contains("token")
+}
+
+fn is_project_metadata_path(path: &Path) -> bool {
+    path.components().any(|component| {
+        matches!(component, Component::Normal(name) if name == ".git" || name == ".aiagent")
+    })
 }
 
 fn is_protected_delete_path(path: &Path, root: &Path) -> bool {
@@ -729,7 +757,7 @@ impl Tool for WriteFile {
         "write_file"
     }
     fn description(&self) -> &'static str {
-        "Write UTF-8 text to a file inside the working directory; requires --allow-write."
+        "Write UTF-8 text to a file inside the working directory; requires write permission."
     }
     fn parameters_schema(&self) -> Value {
         json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false})
@@ -769,6 +797,11 @@ impl Tool for WriteFile {
         }
         let path = context.resolve_new(path)?;
         context.ensure_mutation_allowed(&path, content)?;
+        if path.is_symlink() {
+            return Err(AppError::UnsafeEdit(
+                "символическая ссылка запрещена".to_owned(),
+            ));
+        }
         let previous = fs::read(&path).unwrap_or_default();
         let backup = checkpoint(&path, &previous)?;
         fs::write(&path, content).map_err(|e| AppError::Tool(e.to_string()))?;
@@ -790,7 +823,7 @@ impl Tool for CreateFile {
         "create_file"
     }
     fn description(&self) -> &'static str {
-        "Create a new UTF-8 file and any missing parent directories without overwriting an existing file; requires --allow-write. Use this for new files and folders such as src/main.py."
+        "Create a new UTF-8 file and any missing parent directories without overwriting an existing file; requires write permission. Use this for new files and folders such as src/main.py."
     }
     fn parameters_schema(&self) -> Value {
         json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false})
@@ -813,7 +846,7 @@ impl Tool for CreateFile {
             ));
         }
         let path = context.resolve_new(raw)?;
-        if path.exists() {
+        if fs::symlink_metadata(&path).is_ok() {
             return Err(AppError::UnsafeEdit(format!(
                 "файл уже существует: {}",
                 path.display()
@@ -966,22 +999,11 @@ impl Tool for ApplyPatch {
                 "Предпросмотр diff (изменение НЕ применено):\n{diff}"
             )));
         }
-        if !context.interactive || !context.confirm_writes {
+        if !context.allow_write {
             return Err(AppError::WriteConfirmationRequired);
         }
-        print!("Применить этот diff? [y/N] ");
-        io::stdout()
-            .flush()
-            .map_err(|error| AppError::Tool(error.to_string()))?;
-        let mut answer = String::new();
-        io::stdin()
-            .read_line(&mut answer)
-            .map_err(|error| AppError::Tool(error.to_string()))?;
-        if !matches!(
-            answer.trim().to_ascii_lowercase().as_str(),
-            "y" | "yes" | "д" | "да"
-        ) {
-            return Err(AppError::Tool("patch отклонён пользователем".to_owned()));
+        if !context.auto_approve_patch || context.confirm_writes {
+            confirm_action(context, "Применить этот diff?")?;
         }
         let backup = checkpoint(&path, current.as_bytes())?;
         fs::write(&path, updated).map_err(|error| AppError::Tool(error.to_string()))?;
@@ -1067,6 +1089,179 @@ fn unified_diff(path: &Path, before: &str, after: &str) -> String {
 mod safety_tests {
     use super::*;
 
+    fn git_project() -> PathBuf {
+        let root = std::env::temp_dir().join(format!("ai-agent-edit-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join(".git")).unwrap();
+        root.canonicalize().unwrap()
+    }
+
+    #[tokio::test]
+    async fn project_writes_support_nested_files_and_patch_with_explicit_desktop_policy() {
+        let root = git_project();
+        let mut context = ToolContext::new(&root, true);
+        context.auto_approve_patch = true;
+        CreateFile
+            .execute(
+                json!({"path":"src/nested/main.rs","content":"old"}),
+                &context,
+            )
+            .await
+            .unwrap();
+        let path = root.join("src/nested/main.rs");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "old");
+        assert!(
+            CreateFile
+                .execute(
+                    json!({"path":"src/nested/main.rs","content":"overwrite"}),
+                    &context
+                )
+                .await
+                .is_err()
+        );
+        ApplyPatch
+            .execute(
+                json!({"path":"src/nested/main.rs","old_text":"old","new_text":"new","apply":true}),
+                &context,
+            )
+            .await
+            .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+        WriteFile
+            .execute(
+                json!({"path":"src/nested/main.rs","content":"written"}),
+                &context,
+            )
+            .await
+            .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "written");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cli_and_unapproved_patch_remain_read_only() {
+        let root = git_project();
+        let path = root.join("main.rs");
+        fs::write(&path, "old").unwrap();
+        for context in [
+            ToolContext::new(&root, false),
+            ToolContext::new(&root, true),
+        ] {
+            assert!(
+                ApplyPatch
+                    .execute(
+                        json!({"path":"main.rs","old_text":"old","new_text":"new","apply":false}),
+                        &context
+                    )
+                    .await
+                    .is_ok()
+            );
+            assert!(matches!(
+                ApplyPatch
+                    .execute(
+                        json!({"path":"main.rs","old_text":"old","new_text":"new","apply":true}),
+                        &context
+                    )
+                    .await,
+                Err(AppError::WriteConfirmationRequired)
+            ));
+        }
+        assert!(matches!(
+            WriteFile
+                .execute(
+                    json!({"path":"main.rs","content":"new"}),
+                    &ToolContext::new(&root, false)
+                )
+                .await,
+            Err(AppError::WriteConfirmationRequired)
+        ));
+        assert_eq!(fs::read_to_string(path).unwrap(), "old");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn writes_reject_traversal_symlinks_and_protected_metadata() {
+        let root = git_project();
+        let other = root
+            .parent()
+            .unwrap()
+            .join(format!("outside-{}", Uuid::new_v4()));
+        fs::write(&other, "untouched").unwrap();
+        let mut context = ToolContext::new(&root, true);
+        context.auto_approve_patch = true;
+        for path in [
+            format!("../{}", other.file_name().unwrap().to_string_lossy()),
+            other.display().to_string(),
+        ] {
+            assert!(
+                WriteFile
+                    .execute(json!({"path":path,"content":"changed"}), &context)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                CreateFile
+                    .execute(json!({"path":path,"content":"changed"}), &context)
+                    .await
+                    .is_err()
+            );
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&other, root.join("linked.rs")).unwrap();
+            assert!(
+                WriteFile
+                    .execute(json!({"path":"linked.rs","content":"changed"}), &context)
+                    .await
+                    .is_err()
+            );
+            assert!(ApplyPatch.execute(json!({"path":"linked.rs","old_text":"untouched","new_text":"changed","apply":true}), &context).await.is_err());
+            std::os::unix::fs::symlink(root.parent().unwrap(), root.join("linked-dir")).unwrap();
+            assert!(
+                CreateFile
+                    .execute(
+                        json!({"path":"linked-dir/escape.rs","content":"changed"}),
+                        &context
+                    )
+                    .await
+                    .is_err()
+            );
+        }
+        for path in [
+            ".env",
+            ".aiagent/config.json",
+            ".git/config",
+            "src/secret.key",
+        ] {
+            assert!(
+                CreateFile
+                    .execute(json!({"path":path,"content":"data"}), &context)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                WriteFile
+                    .execute(json!({"path":path,"content":"data"}), &context)
+                    .await
+                    .is_err()
+            );
+        }
+        assert_eq!(fs::read_to_string(&other).unwrap(), "untouched");
+        fs::write(root.join("main.rs"), "old").unwrap();
+        context.confirm_writes = true;
+        assert!(matches!(
+            ApplyPatch
+                .execute(
+                    json!({"path":"main.rs","old_text":"old","new_text":"new","apply":true}),
+                    &context
+                )
+                .await,
+            Err(AppError::WriteConfirmationRequired)
+        ));
+        assert_eq!(fs::read_to_string(root.join("main.rs")).unwrap(), "old");
+        fs::remove_file(other).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn detects_secret_markers_and_protected_names() {
         assert!(find_secret("token=ghp_example").is_some());
@@ -1092,7 +1287,10 @@ mod safety_tests {
         std::fs::create_dir_all(&root).unwrap();
         let context = ToolContext::new(&root, true);
         let path = context.resolve_new("src/nested/main.py").unwrap();
-        assert_eq!(path, root.join("src/nested/main.py"));
+        assert_eq!(
+            path,
+            root.canonicalize().unwrap().join("src/nested/main.py")
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

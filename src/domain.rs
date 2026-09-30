@@ -131,13 +131,22 @@ impl Session {
         working_dir: impl Into<PathBuf>,
         model: impl Into<String>,
     ) -> Result<Self, AppError> {
+        Self::new_with_id(Uuid::new_v4(), working_dir, model)
+    }
+
+    /// Creates a runtime history with the ID already allocated by the application service.
+    pub fn new_with_id(
+        id: Uuid,
+        working_dir: impl Into<PathBuf>,
+        model: impl Into<String>,
+    ) -> Result<Self, AppError> {
         let model = model.into();
         if model.trim().is_empty() {
             return Err(AppError::EmptyModel);
         }
 
         Ok(Self {
-            id: Uuid::new_v4(),
+            id,
             working_dir: working_dir.into(),
             model,
             messages: Vec::new(),
@@ -204,10 +213,19 @@ impl Session {
         count
     }
 
+    /// Persists history by replacing a sibling file, preserving the old document on failure.
     pub fn save_to(&self, path: impl AsRef<Path>) -> Result<(), AppError> {
+        let path = path.as_ref();
         let data = serde_json::to_vec_pretty(self)
             .map_err(|error| AppError::SessionPersistence(error.to_string()))?;
-        std::fs::write(path, data).map_err(|error| AppError::SessionPersistence(error.to_string()))
+        let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+        std::fs::write(&temporary, data)
+            .map_err(|error| AppError::SessionPersistence(error.to_string()))?;
+        if let Err(error) = std::fs::rename(&temporary, path) {
+            let _ = std::fs::remove_file(temporary);
+            return Err(AppError::SessionPersistence(error.to_string()));
+        }
+        Ok(())
     }
 
     pub fn load_from(path: impl AsRef<Path>) -> Result<Self, AppError> {

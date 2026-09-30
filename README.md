@@ -9,12 +9,13 @@
 
 - LiteLLM и Ollama через `/chat/completions`;
 - одноразовый prompt и интерактивный REPL;
-- сохранение истории в `<working-dir>/.aiagent/session.json`;
+- сохранение CLI-истории в `<working-dir>/.aiagent/session.json`; Desktop хранит до десяти отдельных историй в `<project-dir>/.aiagent/sessions/`;
 - tools `read_file`, `list_directory`, `write_file`, `search_files`,
   `read_lines`, `project_search`, read-only email tools
   `list_recent_emails`, `get_email`, `search_emails` и опциональный `run_command`;
 - ограничение tools списком `enabled_tools`;
-- запись файлов выключена без явного `allow_write = true`;
+- CLI: запись файлов выключена без явного `allow_write = true` или `--allow-write`;
+- Desktop Chat-bot: запись и patch файлов выбранного проекта разрешены по умолчанию (кроме защищённых путей и секретов); при отдельном `working_dir` или `confirm_writes = true` запись блокируется;
 - diff-based редактирование через `apply_patch` с preview и подтверждением;
 - checkpoint перед записью и `rollback_last_change` для отката;
 - запрет `.env`, credential/secret-файлов и секретов в содержимом;
@@ -75,6 +76,18 @@ make release-all
 project-local configuration, показывает доступные модели, создаёт session и
 передаёт prompt существующему Rust Agent loop.
 
+На стартовом экране также доступен Assistant: готовые запросы к почте,
+календарю, веб-поиску и локальному документу, а также проектные пресеты
+инструкций. Это read-only режим без инструментов записи; облачные документы и
+распознавание/конвертация пока недоступны. Содержимое выбранного документа
+обрабатывается в Rust и передаётся настроенному LLM только после Send; оно
+попадает в проектную историю сессии. Настройка и ограничения описаны в
+[RUNNING.md](RUNNING.md#assistant-workspace).
+
+Режим Coder пока предоставляет только read-only инспекцию дерева и Git diff,
+не запускает проектный код и не разрешает prompt или запись. Ограничения,
+контракт `.venv` и проверки описаны в [docs/desktop-coder.md](docs/desktop-coder.md).
+
 Требуются Rust, Node.js и системные WebView-зависимости Tauri для вашей ОС.
 Запуск из корня репозитория:
 
@@ -93,9 +106,12 @@ cargo install tauri-cli --version '^2'
 ```
 
 Для production package после настройки platform signing используйте
-`cargo tauri build --manifest-path src-tauri/Cargo.toml`. API keys и OAuth
-tokens не находятся во frontend или Tauri config; их обработка остаётся в
-Rust backend и OS credential storage.
+`cargo tauri build --manifest-path src-tauri/Cargo.toml`. Ключи не встраиваются
+в frontend assets или Tauri config, но локальный редактор настроек получает
+сырой `.aiagent/config.json` и `.aiagent/providers.json` (включая возможные
+секреты) через IPC; доверяйте выбранному проекту и приложению. OAuth refresh
+tokens хранятся в OS credential storage. Подробнее —
+[контракт Desktop API](docs/desktop-application-api.md).
 
 Для release-сборки всего проекта:
 
@@ -104,7 +120,7 @@ make release-all
 ```
 
 Команда собирает консольный бинарник `target/release/ai-agent` и desktop
-приложение `via-agent` в `src-tauri/target/release/bundle/`. Для установки
+приложение `via-agent` в `target/release/bundle/`. Для установки
 команды desktop в `~/.cargo/bin`:
 
 ```bash
@@ -114,6 +130,18 @@ via-agent --working-dir /path/to/project
 
 Консольный агент по-прежнему запускается командой `ai-agent`. Удалить desktop
 launcher можно через `make desktop-uninstall`.
+
+При интерактивном запуске `ai-agent` без пути и без `AI_AGENT_PROJECT_DIR`
+после первого успешного открытия показывается список доступных недавних
+проектов (последний — первым) и текущий каталог. Выберите проект стрелками и
+Enter; Esc оставляет текущий каталог. Недоступные пути пропускаются. Список
+хранится в `~/.ai-agent/state.json` вместе с временем запуска и UUID проекта,
+но без сообщений и секретов. Первый запуск без истории работает как прежде.
+`--project-dir`, `--working-dir`, `AI_AGENT_PROJECT_DIR`, одноразовый prompt,
+`--init`, scheduler и OAuth-команды не вызывают выбора проекта. После выбора
+интерактивный CLI по-прежнему отдельно предлагает загрузить legacy-историю
+`<working-dir>/.aiagent/session.json`; по умолчанию ответ — нет. Повреждённый
+файл состояния не перезаписывается и не мешает явному запуску.
 
 После установки бинарника командой `cargo install` его можно запускать из любой
 папки проекта:
@@ -828,9 +856,11 @@ max_loop_seconds = 600
 max_diff_bytes = 100000
 ```
 
-`allow_write = true` разрешает `write_file`, но tool всё равно должен быть в
+`allow_write = true` разрешает `write_file` в CLI, но tool всё равно должен быть в
 `enabled_tools`. При `confirm_writes = true` интерактивный REPL запрашивает
-подтверждение перед записью.
+подтверждение перед записью. Desktop Chat-bot отдельно разрешает project-local
+write tools по умолчанию; явное требование подтверждения блокирует запись до
+появления UI-подтверждений. Подробнее: [RUNNING.md](RUNNING.md#desktop-client).
 
 ### Профили агентов и skills
 
@@ -904,13 +934,17 @@ Skills являются инструкциями для system prompt: они н
 
 ## Проверки
 
-Из каталога `ai-agent`:
+Из каталога `ai-agent` (те же проверки запускает Linux CI для всего workspace):
 
 ```bash
-cargo fmt -- --check
-cargo check
-cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check
+cargo check --workspace --locked
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+npm --prefix frontend ci
+npm --prefix frontend run check
+npm --prefix frontend run build
+python3 scripts/check_versions.py
 ```
 
 Или из корня репозитория:
@@ -925,10 +959,10 @@ make clippy
 Полная последовательность:
 
 ```bash
-cargo fmt -- --check \
-  && cargo check \
-  && cargo test \
-  && cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check \
+  && cargo check --workspace --locked \
+  && cargo test --workspace --locked \
+  && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
 ## Текущие ограничения
