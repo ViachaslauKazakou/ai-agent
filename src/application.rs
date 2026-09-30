@@ -28,6 +28,7 @@ use crate::{
     coder::{self, CoderChangeDto, CoderCheckDto, CoderDiffDto, CoderTreeDto, CoderVenvDto},
     session_store::ProjectSessionStore,
     tools::{ToolContext, registry_from_names},
+    tutor::TutorCapabilitiesDto,
 };
 
 /// Version of the command/event contract exchanged with external clients.
@@ -117,6 +118,8 @@ pub struct ApplicationCapabilities {
 pub enum ApplicationCommand {
     /// Ask the backend for its supported protocol features.
     GetCapabilities,
+    /// Return project-scoped Tutor capabilities without creating a lesson/session.
+    GetTutorCapabilities { project_id: String },
     /// Return persisted, secret-free metadata for the startup screen.
     GetStartupState,
     /// Register a project path for later session commands.
@@ -163,6 +166,8 @@ pub enum ApplicationCommand {
 pub enum ApplicationEvent {
     /// Response containing the backend feature set.
     Capabilities(ApplicationCapabilities),
+    /// Explicitly disabled (until implemented) Tutor feature set.
+    TutorCapabilities(TutorCapabilitiesDto),
     /// Persisted metadata required by the desktop startup screen.
     StartupState(StartupStateDto),
     /// Project was accepted and is ready for session creation.
@@ -483,6 +488,14 @@ impl RequestCancellation {
 }
 
 impl ApplicationService {
+    /// Reports Tutor readiness only for an opened project with loaded configuration.
+    pub fn tutor_capabilities(&self, project_id: &str) -> Result<TutorCapabilitiesDto, AppError> {
+        if !self.projects.contains_key(project_id) || !self.configs.contains_key(project_id) {
+            return Err(AppError::InvalidConfig("Tutor project is not open".into()));
+        }
+        Ok(TutorCapabilitiesDto::unavailable())
+    }
+
     fn coder_root(&self, project_id: &str) -> Result<&std::path::Path, AppError> {
         let config = self
             .configs
@@ -1589,6 +1602,9 @@ impl ApplicationService {
             ApplicationCommand::GetCapabilities => {
                 ApplicationEvent::Capabilities(self.capabilities())
             }
+            ApplicationCommand::GetTutorCapabilities { project_id } => {
+                ApplicationEvent::TutorCapabilities(self.tutor_capabilities(&project_id)?)
+            }
             ApplicationCommand::GetStartupState => {
                 ApplicationEvent::StartupState(self.startup_state())
             }
@@ -2103,6 +2119,61 @@ mod tests {
         let mut config = service.configs[&project.id].clone();
         config.confirm_writes = true;
         assert!(!desktop_tool_context(&config, Arc::new(Mutex::new(None))).allow_write);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn tutor_capabilities_are_project_scoped_correlated_and_fail_closed() {
+        let root = std::env::temp_dir().join(format!("tutor-capabilities-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let mut service = ApplicationService::new();
+        let request = Uuid::new_v4();
+        let command = ApplicationCommand::GetTutorCapabilities {
+            project_id: "missing".into(),
+        };
+        let wire = serde_json::to_value(&command).unwrap();
+        assert_eq!(wire["type"], "get_tutor_capabilities");
+        assert_eq!(
+            serde_json::from_value::<ApplicationCommand>(wire).unwrap(),
+            command
+        );
+        assert!(service.execute(request, command).is_err());
+        let project = match service
+            .execute(
+                Uuid::new_v4(),
+                ApplicationCommand::OpenProject { path: root.clone() },
+            )
+            .unwrap()
+            .payload
+        {
+            ApplicationEvent::ProjectOpened(project) => project,
+            _ => panic!("expected opened project"),
+        };
+        let result = service
+            .execute(
+                request,
+                ApplicationCommand::GetTutorCapabilities {
+                    project_id: project.id,
+                },
+            )
+            .unwrap();
+        assert_eq!(result.request_id, request);
+        assert_eq!(result.api_version, APPLICATION_API_VERSION);
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["payload"]["type"], "tutor_capabilities");
+        let ApplicationEvent::TutorCapabilities(tutor) = result.payload else {
+            panic!("expected Tutor capabilities")
+        };
+        assert!(!tutor.available);
+        assert!(!tutor.text);
+        assert!(!tutor.streaming);
+        assert!(!tutor.cancellation);
+        assert!(!tutor.voice);
+        assert!(!tutor.editing);
+        assert!(!tutor.progress);
+        assert!(tutor.reason.is_some());
+        assert!(service.capabilities().cancellation);
+        assert!(!json.to_string().contains(root.to_str().unwrap()));
         fs::remove_dir_all(root).unwrap();
     }
 

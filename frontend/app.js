@@ -10,6 +10,7 @@ import {
   ROUTES,
   applyStartupState,
   beginProjectOpen,
+  canActivateMode,
   completeProjectOpen,
   createAppState,
   failProjectOpen,
@@ -658,7 +659,7 @@ switchProjectButton.addEventListener("click", async () => {
 
 for (const mode of document.querySelectorAll(".mode-card")) {
   mode.addEventListener("click", () => {
-    if (mode.dataset.mode === "chatbot" || mode.dataset.mode === "assistant" || mode.dataset.mode === "coder") {
+    if (canActivateMode(mode.dataset.mode)) {
       selectedMode = mode.dataset.mode;
       assistant.setMode(selectedMode);
       coder.setMode(selectedMode);
@@ -670,7 +671,7 @@ for (const mode of document.querySelectorAll(".mode-card")) {
       pathInput.focus();
       return;
     }
-    launcherFeedback.textContent = `${mode.querySelector("strong").textContent} is planned for a dedicated implementation stage.`;
+    launcherFeedback.textContent = "AI Tutor is unavailable: lesson execution, text/voice transport and progress are not implemented. No Tutor session will start; choose another mode.";
   });
 }
 

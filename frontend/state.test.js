@@ -5,11 +5,17 @@ import {
   ROUTES,
   applyStartupState,
   beginProjectOpen,
+  canActivateMode,
   completeProjectOpen,
   createAppState,
   failProjectOpen,
   returnToLauncher,
 } from "./state.js";
+
+test("Tutor cannot activate the shared Chat-bot composer", () => {
+  for (const mode of ["chatbot", "assistant", "coder"]) assert.equal(canActivateMode(mode), true);
+  for (const mode of ["tutor", "", "unknown", undefined]) assert.equal(canActivateMode(mode), false);
+});
 
 test("startup projects are normalized without changing the initial route", () => {
   const state = applyStartupState(createAppState(), {

@@ -4,6 +4,11 @@ export const ROUTES = Object.freeze({
   WORKSPACE: "workspace",
 });
 
+/** Only modes with dedicated backend paths may become active workspaces. */
+export function canActivateMode(mode) {
+  return mode === "chatbot" || mode === "assistant" || mode === "coder";
+}
+
 /** Creates isolated UI state for one desktop window. */
 export function createAppState() {
   return {

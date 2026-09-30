@@ -27,6 +27,7 @@ Tauri IPC or a loopback browser transport.
 ## Current commands
 
 - `get_capabilities`
+- `get_tutor_capabilities` (opened project only; Tutor unavailable)
 - `get_startup_state`
 - `open_project`
 - `list_projects`
@@ -170,6 +171,12 @@ The preliminary Desktop Coder inspection exposes `coder_tree`, `coder_changes`,
 `coder_diff`, `coder_check`, and `coder_venv` through transport-neutral Rust
 service methods. They are read-only and bounded; the existing agent send endpoint
 is deliberately not available in Coder. See [Coder limitations](desktop-coder.md).
+
+`get_tutor_capabilities` uses the same version-4 command/event envelope and
+requires an opened project with loaded configuration. It returns only disabled
+Tutor-specific feature flags and an explanatory reason; it cannot open lessons
+or call the provider. The DTOs in `src/tutor.rs` are a future contract, not
+stored sessions. See [Tutor architecture and threat model](desktop-tutor.md).
 
 ## Frontend integration direction
 

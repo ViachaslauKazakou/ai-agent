@@ -25,6 +25,7 @@ pub mod scheduler;
 pub mod security_review;
 pub mod session_store;
 pub mod tools;
+pub mod tutor;
 pub mod word_processing;
 
 pub use config::{Config, ProviderConfig, ProviderRegistry};

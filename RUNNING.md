@@ -180,7 +180,8 @@ watcher during the initial binary link.
 The Tauri window opens the launcher through the local Vite server. In the UI:
 
 1. Select `Chat-bot`, `Assistant` or read-only `Coder` on the mode screen.
-   `AI Tutor` still shows an explicit planned-feature notice.
+   `AI Tutor` remains an inactive placeholder: clicking it shows an unavailable
+   notice and never opens a project or starts a lesson.
 2. Choose an available recent project, or click `Choose…` and select a project
    directory.
 3. Click `Open project`. The chat workspace appears only after Rust validates
@@ -262,6 +263,24 @@ The `.venv` indicator inspects metadata and never executes or creates an
 environment. Composer is disabled, and agent writes, project builds, pip and
 rollback are not implemented for Desktop Coder yet. See
 [the safety contract](docs/desktop-coder.md) for limits and manual checks.
+
+### AI Tutor (contract preview, not available)
+
+The AI Tutor card cannot start lessons, make provider calls, record audio or
+save progress. Rust exposes a project-scoped `get_tutor_capabilities` metadata
+command with all Tutor features set to false and a reason. Its lesson and
+session DTOs are contract types only; they are not executable or persisted.
+Neither Chat-bot nor Assistant `Send` is a Tutor endpoint, and their sessions
+and editing permissions must not be used as a workaround. See
+[Tutor architecture and threat model](docs/desktop-tutor.md) for planned text,
+voice, cancellation, lesson editing and progress boundaries.
+
+Manual check: click the Tutor card on the launcher and confirm the explicit
+unavailable notice. Select Chat-bot afterward and verify that Chat-bot still
+works normally; Tutor never becomes the active mode and no Tutor history,
+microphone prompt or lesson controls appear. With a project open, the
+`get_tutor_capabilities` application command reports `available: false` and
+all feature flags false; with an unknown project ID it returns an error.
 
 The RAG block is a disabled design placeholder; this stage does not index or
 send project content to a retrieval service. Missing recent project paths are
@@ -363,5 +382,6 @@ arguments, tool results, API keys, and OAuth tokens.
 cargo fmt --all -- --check
 cargo test --workspace
 cargo check --workspace
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cd frontend && npm run check && npm run build
 ```
