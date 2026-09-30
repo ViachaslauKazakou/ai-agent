@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test *.test.js",
-    "check": "node --check app.js && node --check state.js && node --check assistant.js && node --check assistant-ui.js && npm test",
+    "check": "node --check app.js && node --check state.js && node --check assistant.js && node --check assistant-ui.js && node --check coder-ui.js && npm test",
     "build": "vite build",
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort --configLoader native"
   },

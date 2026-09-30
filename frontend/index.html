@@ -118,6 +118,15 @@
             <div class="assistant-presets"><label class="field-label" for="assistant-preset">My prompt presets (instructions, not autonomous subagents)</label><select id="assistant-preset"><option value="">Choose a preset…</option></select><button id="assistant-manage" type="button" class="toolbar-button">Manage prompts</button></div>
             <p id="assistant-status" class="settings-status" role="status" aria-live="polite"></p>
           </section>
+          <section id="coder-panel" class="coder-panel" hidden aria-label="Coder project inspection">
+            <div class="assistant-header"><div><span class="eyebrow">PROJECT INSPECTION · READ ONLY</span><h2>Coder</h2></div><button id="coder-refresh" class="toolbar-button" type="button">Refresh</button></div>
+            <p class="settings-help">Project files and Git changes only. Agent edits, build/test execution and virtual environment creation are unavailable until a sandboxed approval contract exists. No shell is exposed.</p>
+            <p id="coder-status" class="settings-status" role="status" aria-live="polite"></p>
+            <div class="coder-grid"><section><h3>Files</h3><div id="coder-tree" class="coder-list"></div></section><section><h3>Changes</h3><div id="coder-changes" class="coder-list"></div></section></div>
+            <div class="coder-controls"><label for="coder-staged">Diff source</label><select id="coder-staged"><option value="false">Unstaged</option><option value="true">Staged</option></select><button id="coder-check" type="button" class="toolbar-button">Check whitespace</button></div>
+            <pre id="coder-diff" class="coder-output" aria-label="Selected file diff">Select a changed file to view its diff.</pre>
+            <p id="coder-venv" class="settings-help"></p>
+          </section>
           <div id="messages" class="messages" aria-live="polite">
             <article class="message assistant">
               <span class="message-label">SYSTEM</span>

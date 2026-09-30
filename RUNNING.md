@@ -179,8 +179,8 @@ watcher during the initial binary link.
 
 The Tauri window opens the launcher through the local Vite server. In the UI:
 
-1. Select `Chat-bot` or `Assistant` on the mode screen. `AI Tutor` and `Coder`
-   still show an explicit planned-feature notice.
+1. Select `Chat-bot`, `Assistant` or read-only `Coder` on the mode screen.
+   `AI Tutor` still shows an explicit planned-feature notice.
 2. Choose an available recent project, or click `Choose…` and select a project
    directory.
 3. Click `Open project`. The chat workspace appears only after Rust validates
@@ -198,7 +198,7 @@ The Tauri window opens the launcher through the local Vite server. In the UI:
      there is no Attach button. A corrupt or
     incompatible history is kept intact and reported; repair it before creating
     new sessions.
-5. Enter a prompt and click `Send`. Desktop does not stop at 20 tool rounds;
+5. For Chat-bot or Assistant, enter a prompt and click `Send`. Desktop does not stop at 20 tool rounds;
     it continues until the agent finishes or the configured `max_loop_seconds`
     timeout is reached (600 seconds by default). CLI requests still honor
     `max_tool_rounds`.
@@ -251,6 +251,17 @@ removes all file-write, process, Git mutation and mail-send tools, even when
 Chat-bot in the same session permits writes; changing modes reloads the latest
 checkpoint. The web search tool can contact external services; do not include
 private data in search queries.
+
+### Coder workspace (read-only preview)
+
+Select Coder before opening the project. Inspect the bounded file tree and Git
+changes; click a changed file to see staged/unstaged diff. Git inspection only
+works when the selected project directory is itself a Git repository root.
+`Check whitespace` runs only `git diff --check`; it does not run project tests.
+The `.venv` indicator inspects metadata and never executes or creates an
+environment. Composer is disabled, and agent writes, project builds, pip and
+rollback are not implemented for Desktop Coder yet. See
+[the safety contract](docs/desktop-coder.md) for limits and manual checks.
 
 The RAG block is a disabled design placeholder; this stage does not index or
 send project content to a retrieval service. Missing recent project paths are

@@ -44,3 +44,4 @@ urlencoding = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 base64 = "0.22"
 sha2 = "0.10"
+cap-std = "=4.0.3"

@@ -166,6 +166,11 @@ launch state. Prompt presets use versioned schema 1 in
 or future-version files are preserved. Disabled capabilities do not imply that
 OAuth has been performed; connector failures are reported at execution time.
 
+The preliminary Desktop Coder inspection exposes `coder_tree`, `coder_changes`,
+`coder_diff`, `coder_check`, and `coder_venv` through transport-neutral Rust
+service methods. They are read-only and bounded; the existing agent send endpoint
+is deliberately not available in Coder. See [Coder limitations](desktop-coder.md).
+
 ## Frontend integration direction
 
 The recommended desktop implementation is a Tauri 2 adapter over this API.

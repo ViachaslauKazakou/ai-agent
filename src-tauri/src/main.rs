@@ -8,6 +8,7 @@ use ai_agent::application::{
     ApplicationCommand, ApplicationEnvelope, ApplicationEvent, ApplicationService,
     AssistantCapabilitiesDto, AssistantPromptDto, SettingsDocuments,
 };
+use ai_agent::coder::{CoderChangeDto, CoderCheckDto, CoderDiffDto, CoderTreeDto, CoderVenvDto};
 use ai_agent::LaunchStateStore;
 use std::{path::PathBuf, sync::Arc};
 use tauri::State;
@@ -241,6 +242,76 @@ fn tool_activity(activity: State<'_, DesktopActivity>) -> Option<String> {
     activity.0.lock().ok().and_then(|value| value.clone())
 }
 
+#[tauri::command]
+async fn coder_tree(
+    state: State<'_, DesktopState>,
+    project_id: String,
+) -> Result<CoderTreeDto, String> {
+    state
+        .0
+        .lock()
+        .await
+        .coder_tree(&project_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn coder_changes(
+    state: State<'_, DesktopState>,
+    project_id: String,
+) -> Result<Vec<CoderChangeDto>, String> {
+    state
+        .0
+        .lock()
+        .await
+        .coder_changes(&project_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn coder_diff(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    path: String,
+    staged: bool,
+) -> Result<CoderDiffDto, String> {
+    state
+        .0
+        .lock()
+        .await
+        .coder_diff(&project_id, &path, staged)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn coder_check(
+    state: State<'_, DesktopState>,
+    project_id: String,
+) -> Result<CoderCheckDto, String> {
+    state
+        .0
+        .lock()
+        .await
+        .coder_check(&project_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn coder_venv(
+    state: State<'_, DesktopState>,
+    project_id: String,
+) -> Result<CoderVenvDto, String> {
+    state
+        .0
+        .lock()
+        .await
+        .coder_venv(&project_id)
+        .map_err(|error| error.to_string())
+}
+
 /// Returns the Tauri application and registers the stateful command adapter.
 fn main() {
     let launch_path = match direct_open_path(std::env::args()) {
@@ -267,7 +338,12 @@ fn main() {
             assistant_capabilities,
             assistant_prompts,
             save_assistant_prompts,
-            send_assistant_message
+            send_assistant_message,
+            coder_tree,
+            coder_changes,
+            coder_diff,
+            coder_check,
+            coder_venv
         ])
         .run(tauri::generate_context!())
         .expect("error while running ai-agent desktop application");

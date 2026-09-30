@@ -84,6 +84,10 @@ project-local configuration, показывает доступные модел�
 попадает в проектную историю сессии. Настройка и ограничения описаны в
 [RUNNING.md](RUNNING.md#assistant-workspace).
 
+Режим Coder пока предоставляет только read-only инспекцию дерева и Git diff,
+не запускает проектный код и не разрешает prompt или запись. Ограничения,
+контракт `.venv` и проверки описаны в [docs/desktop-coder.md](docs/desktop-coder.md).
+
 Требуются Rust, Node.js и системные WebView-зависимости Tauri для вашей ОС.
 Запуск из корня репозитория:
 

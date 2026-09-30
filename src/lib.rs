@@ -10,6 +10,7 @@ pub mod application;
 pub mod ci;
 pub mod cli;
 pub mod cli_startup;
+pub mod coder;
 pub mod config;
 pub mod connectors;
 pub mod domain;

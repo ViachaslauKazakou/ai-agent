@@ -25,6 +25,7 @@ use crate::{
     ProviderRegistry, RecentSession, Session,
     agents::AgentCatalog,
     cli::Cli,
+    coder::{self, CoderChangeDto, CoderCheckDto, CoderDiffDto, CoderTreeDto, CoderVenvDto},
     session_store::ProjectSessionStore,
     tools::{ToolContext, registry_from_names},
 };
@@ -482,6 +483,49 @@ impl RequestCancellation {
 }
 
 impl ApplicationService {
+    fn coder_root(&self, project_id: &str) -> Result<&std::path::Path, AppError> {
+        let config = self
+            .configs
+            .get(project_id)
+            .ok_or_else(|| AppError::InvalidConfig("project is not open".into()))?;
+        if config.working_dir != config.project_dir {
+            return Err(AppError::InvalidConfig(
+                "Coder requires the selected project as working directory".into(),
+            ));
+        }
+        Ok(&config.project_dir)
+    }
+
+    /// Bounded, non-executing project tree.
+    pub fn coder_tree(&self, project_id: &str) -> Result<CoderTreeDto, AppError> {
+        coder::tree(self.coder_root(project_id)?)
+    }
+
+    /// Git changes belonging to the selected project repository.
+    pub async fn coder_changes(&self, project_id: &str) -> Result<Vec<CoderChangeDto>, AppError> {
+        coder::changes(self.coder_root(project_id)?).await
+    }
+
+    /// Bounded tracked-file diff, staged or unstaged.
+    pub async fn coder_diff(
+        &self,
+        project_id: &str,
+        path: &str,
+        staged: bool,
+    ) -> Result<CoderDiffDto, AppError> {
+        coder::diff(self.coder_root(project_id)?, path, staged).await
+    }
+
+    /// Non-executing whitespace diagnostic, not a project build/test run.
+    pub async fn coder_check(&self, project_id: &str) -> Result<CoderCheckDto, AppError> {
+        coder::check_whitespace(self.coder_root(project_id)?).await
+    }
+
+    /// Reads only project-local virtual environment metadata.
+    pub fn coder_venv(&self, project_id: &str) -> Result<CoderVenvDto, AppError> {
+        coder::venv(self.coder_root(project_id)?)
+    }
+
     /// Exposes effective project permissions without disclosing connector credentials.
     pub fn assistant_capabilities(
         &self,

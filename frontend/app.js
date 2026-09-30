@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createAssistantUI } from "./assistant-ui.js";
+import { createCoderUI } from "./coder-ui.js";
 import {
   ROUTES,
   applyStartupState,
@@ -71,6 +72,7 @@ let projectSessions = [];
 let busy = false;
 let selectedMode = "chatbot";
 const assistant = createAssistantUI({ invoke, open, promptInput, getProject: () => activeProject, getSession: () => activeSession, isBusy: () => busy });
+const coder = createCoderUI({ invoke, getProject: () => activeProject });
 
 function renderSavedSessions() {
   const selected = savedSessions.value || activeSession?.id;
@@ -108,13 +110,14 @@ function activateSession(value, restored = false) {
   modelInput.dataset.provider = value.provider;
   renderModels(availableProviders);
   createSessionButton.disabled = busy;
-  promptInput.disabled = false;
-  sendButton.disabled = false;
+  promptInput.disabled = selectedMode === "coder";
+  sendButton.disabled = selectedMode === "coder";
   resetConversation();
   if (restored) messages.querySelector("p").textContent = `${value.message_count} previous messages are loaded in the backend. Previous messages are not displayed yet.`;
   status.textContent = restored ? `Session restored · ${value.model}` : "Session ready";
   savedSessions.value = value.id;
   assistant.render();
+  coder.render();
 }
 
 function renderRoute() {
@@ -126,6 +129,7 @@ function renderRoute() {
   switchProjectButton.hidden = !inWorkspace;
   if (inWorkspace) activeProjectPath.textContent = appState.activeProject.path;
   assistant.render();
+  coder.render();
 }
 
 function projectName(path) {
@@ -461,6 +465,7 @@ async function openProject(path) {
     const project = eventPayload(envelope, "project_opened");
     activeProject = project;
     assistant.reset();
+    coder.reset();
     logStep("project opened", `${project.id}: ${project.path}`);
     createSessionButton.disabled = false;
     activeSession = undefined;
@@ -491,6 +496,7 @@ async function openProject(path) {
     }
     await refreshSessions();
     await assistant.refresh();
+    if (selectedMode === "coder") await coder.refresh();
     if (activeSession) savedSessions.value = activeSession.id;
     const item = document.createElement("article");
     item.className = "message assistant";
@@ -507,6 +513,7 @@ async function openProject(path) {
     activeProject = undefined;
     activeSession = undefined;
     assistant.reset();
+    coder.reset();
     pendingRestoredSession = undefined;
     createSessionButton.disabled = true;
     projectSessions = [];
@@ -628,6 +635,7 @@ switchProjectButton.addEventListener("click", async () => {
   activeProject = undefined;
   activeSession = undefined;
   assistant.reset();
+  coder.reset();
   promptInput.value = "";
   pendingRestoredSession = undefined;
   usedToolNames.clear();
@@ -650,12 +658,15 @@ switchProjectButton.addEventListener("click", async () => {
 
 for (const mode of document.querySelectorAll(".mode-card")) {
   mode.addEventListener("click", () => {
-    if (mode.dataset.mode === "chatbot" || mode.dataset.mode === "assistant") {
+    if (mode.dataset.mode === "chatbot" || mode.dataset.mode === "assistant" || mode.dataset.mode === "coder") {
       selectedMode = mode.dataset.mode;
       assistant.setMode(selectedMode);
+      coder.setMode(selectedMode);
+      promptInput.disabled = selectedMode === "coder" || !activeSession;
+      sendButton.disabled = selectedMode === "coder" || !activeSession;
       for (const card of document.querySelectorAll(".mode-card")) card.classList.toggle("active", card === mode);
       document.querySelector(".launch-project .eyebrow").textContent = `${selectedMode.toUpperCase()} SETUP`;
-      launcherFeedback.textContent = selectedMode === "assistant" ? "Select a project to open the Assistant workspace." : "Select a project to chat.";
+      launcherFeedback.textContent = selectedMode === "coder" ? "Select a project for read-only Coder inspection." : selectedMode === "assistant" ? "Select a project to open the Assistant workspace." : "Select a project to chat.";
       pathInput.focus();
       return;
     }
@@ -668,6 +679,7 @@ providerInput.addEventListener("change", () => selectProvider(providerInput.valu
 composer.addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = promptInput.value.trim();
+  if (selectedMode === "coder") return;
   if (!activeSession || !prompt || busy) return;
   promptInput.disabled = true;
   sendButton.disabled = true;
@@ -718,9 +730,9 @@ composer.addEventListener("submit", async (event) => {
     if (activeSession) savedSessions.value = activeSession.id;
     stopActivityPolling();
     setThinking(false);
-    promptInput.disabled = false;
-    sendButton.disabled = false;
-    promptInput.focus();
+    promptInput.disabled = selectedMode === "coder" || !activeSession;
+    sendButton.disabled = selectedMode === "coder" || !activeSession;
+    if (!promptInput.disabled) promptInput.focus();
   }
 });
 

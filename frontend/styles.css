@@ -123,6 +123,16 @@ input:focus, textarea:focus, select:focus { border-color: #8eb9a7; }
 .settings-status { color: #f1c978; font: .7rem ui-monospace, SFMono-Regular, Menlo, monospace; }
 .assistant-panel { max-height: 48%; overflow-y: auto; padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--panel-raised); }
 .assistant-panel[hidden] { display: none; }
+.coder-panel { max-height: 65%; overflow-y: auto; padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--panel-raised); }
+.coder-panel[hidden] { display: none; }
+.coder-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.coder-grid h3 { font-size: .85rem; font-weight: 400; }
+.coder-list { max-height: 125px; overflow: auto; overflow-wrap: anywhere; font: .72rem/1.6 ui-monospace, monospace; }
+.coder-list button { display: block; width: 100%; border: 0; padding: 3px; color: var(--ink); background: transparent; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.coder-list button:focus-visible { outline: 1px solid var(--mint); }
+.coder-controls { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.coder-controls select { width: auto; }
+.coder-output { max-height: 155px; overflow: auto; padding: 10px; background: var(--panel); white-space: pre-wrap; overflow-wrap: anywhere; font: .7rem/1.4 ui-monospace, monospace; }
 .assistant-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .assistant-header h2 { margin: 4px 0 8px; font-size: 1.35rem; font-weight: 400; }
 .assistant-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
