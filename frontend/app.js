@@ -466,9 +466,10 @@ async function openProject(path) {
       payload: { path },
     });
     const project = eventPayload(envelope, "project_opened");
+    const previousProjectId = activeProject?.id;
     activeProject = project;
     assistant.reset();
-    coder.reset();
+    coder.reset(previousProjectId);
     logStep("project opened", `${project.id}: ${project.path}`);
     createSessionButton.disabled = false;
     activeSession = undefined;
@@ -513,10 +514,11 @@ async function openProject(path) {
     renderRoute();
   } catch (error) {
     appState = failProjectOpen(appState);
+    const failedProjectId = activeProject?.id;
     activeProject = undefined;
     activeSession = undefined;
     assistant.reset();
-    coder.reset();
+    coder.reset(failedProjectId);
     pendingRestoredSession = undefined;
     createSessionButton.disabled = true;
     projectSessions = [];
@@ -635,10 +637,11 @@ deleteSavedButton.addEventListener("click", async () => {
 switchProjectButton.addEventListener("click", async () => {
   if (busy) return;
   appState = returnToLauncher(appState);
+  const previousProjectId = activeProject?.id;
   activeProject = undefined;
   activeSession = undefined;
   assistant.reset();
-  coder.reset();
+  coder.reset(previousProjectId);
   promptInput.value = "";
   pendingRestoredSession = undefined;
   usedToolNames.clear();
