@@ -243,6 +243,81 @@ fn tool_activity(activity: State<'_, DesktopActivity>) -> Option<String> {
     activity.0.lock().ok().and_then(|value| value.clone())
 }
 
+/// Ask a selected project profile to prepare one bounded file diff.
+#[tauri::command]
+async fn coder_propose_edit(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    profile_id: String,
+    path: String,
+    prompt: String,
+) -> Result<ai_agent::application::CoderProposalDto, String> {
+    state
+        .0
+        .lock()
+        .await
+        .coder_propose_edit(&project_id, &profile_id, &path, &prompt)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Approve exactly one backend-retained Coder diff.
+#[tauri::command]
+async fn coder_approve_edit(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    profile_id: String,
+    proposal_id: String,
+) -> Result<ai_agent::application::CoderAppliedEditDto, String> {
+    let proposal_id =
+        Uuid::parse_str(&proposal_id).map_err(|error| format!("invalid proposal id: {error}"))?;
+    state
+        .0
+        .lock()
+        .await
+        .coder_approve_edit(&project_id, &profile_id, proposal_id)
+        .map_err(|error| error.to_string())
+}
+
+/// Reject and consume one backend-retained Coder diff.
+#[tauri::command]
+async fn coder_reject_edit(
+    state: State<'_, DesktopState>,
+    proposal_id: String,
+) -> Result<(), String> {
+    let proposal_id =
+        Uuid::parse_str(&proposal_id).map_err(|error| format!("invalid proposal id: {error}"))?;
+    state
+        .0
+        .lock()
+        .await
+        .coder_reject_edit(proposal_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn coder_clear_proposals(
+    state: State<'_, DesktopState>,
+    project_id: String,
+) -> Result<(), String> {
+    state.0.lock().await.coder_clear_proposals(&project_id);
+    Ok(())
+}
+
+/// Lists safe project agent profiles and read-only/approval-bound capabilities.
+#[tauri::command]
+async fn coder_profiles(
+    state: State<'_, DesktopState>,
+    project_id: String,
+) -> Result<Vec<ai_agent::application::CoderProfileDto>, String> {
+    state
+        .0
+        .lock()
+        .await
+        .coder_profiles(&project_id)
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn coder_tree(
     state: State<'_, DesktopState>,
@@ -340,6 +415,11 @@ fn main() {
             assistant_prompts,
             save_assistant_prompts,
             send_assistant_message,
+            coder_propose_edit,
+            coder_approve_edit,
+            coder_reject_edit,
+            coder_clear_proposals,
+            coder_profiles,
             coder_tree,
             coder_changes,
             coder_diff,

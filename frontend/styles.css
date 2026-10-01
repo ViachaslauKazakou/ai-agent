@@ -132,6 +132,12 @@ input:focus, textarea:focus, select:focus { border-color: #8eb9a7; }
 .coder-list button:focus-visible { outline: 1px solid var(--mint); }
 .coder-controls { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
 .coder-controls select { width: auto; }
+.coder-compose { display: grid; gap: 8px; margin: 12px 0; }
+.coder-compose textarea { min-height: 72px; resize: vertical; }
+.coder-compose .primary-button { justify-self: start; width: auto; margin: 0; }
+.coder-proposal { margin: 12px 0; padding: 12px; border: 1px solid var(--mint); border-radius: 4px; }
+.coder-proposal h3 { overflow-wrap: anywhere; }
+.coder-proposal .primary-button { width: auto; margin: 0; }
 .coder-output { max-height: 155px; overflow: auto; padding: 10px; background: var(--panel); white-space: pre-wrap; overflow-wrap: anywhere; font: .7rem/1.4 ui-monospace, monospace; }
 .assistant-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .assistant-header h2 { margin: 4px 0 8px; font-size: 1.35rem; font-weight: 400; }
